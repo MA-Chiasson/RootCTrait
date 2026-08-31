@@ -22,5 +22,5 @@ keywords:
 # After creating a Zenodo release, add the DOI here, e.g.:
 # identifiers:
 #   - type: doi
-#     value: 10.5281/zenodo.XXXXXXX
+#     value: 10.5281/zenodo.22212849
 #     description: "Archived version 1.0.0"

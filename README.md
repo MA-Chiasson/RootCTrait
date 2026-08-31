@@ -352,7 +352,7 @@ release and archive it on Zenodo:
    a DOI automatically.
 3. Add the DOI to `CITATION.cff` (see the commented `identifiers` block) and to
    this README, then cite it in your GWAS papers as, for example:
-   "Root traits were extracted with RootCTrait v1.0 (DOI:10.5281/zenodo.XXXXXXX)."
+   "Root traits were extracted with RootCTrait v1.0 (DOI:10.5281/zenodo.22212849)."
 
 ## License
 
