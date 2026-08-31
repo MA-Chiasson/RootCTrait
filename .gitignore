@@ -1,0 +1,16 @@
+# user data and outputs (not versioned)
+data/
+results/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# system
+.DS_Store
+Thumbs.db
+
+# NOTE: example/ IS versioned (bundled synthetic dataset), so no global *.npy ignore.
