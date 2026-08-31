@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+title: "RootCTrait"
+message: "If you use this software, please cite it as below."
+type: software
+version: 1.0.0
+date-released: 2026-01-01
+authors:
+  - family-names: "Chiasson"
+    given-names: "Marc-Antoine"
+    affiliation: "Universite Laval"
+repository-code: "https://github.com/MA-Chiasson/RootCTrait"
+license: MIT
+abstract: >-
+  Automated 3D root system architecture trait extraction from segmented CT
+  volumes, for population-scale phenotyping and quantitative genetics (GWAS).
+keywords:
+  - root phenotyping
+  - CT scan
+  - root system architecture
+  - plant genetics
+  - GWAS
+# After creating a Zenodo release, add the DOI here, e.g.:
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+#     description: "Archived version 1.0.0"

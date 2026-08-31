@@ -1,0 +1,24 @@
+# Dependencies of the root phenotyping pipeline.
+# Installation: pip install -r requirements.txt
+
+# --- Core (always required) ---
+numpy
+scipy
+scikit-image
+h5py
+openpyxl
+
+# --- Interactive HTML figures ---
+# Enabled by default in params.txt (SAVE_FIGURES=1). Without plotly, figures are
+# simply skipped and the rest of the pipeline still works.
+plotly
+
+# --- Reading other input formats (optional, depending on your data) ---
+# tifffile : TIFF stacks (.tif/.tiff)
+# nibabel  : NIfTI volumes (.nii/.nii.gz)
+# Not needed if you only process .mat, .npy or .npz files.
+tifffile
+nibabel
+
+# --- Tests (optional) ---
+pytest

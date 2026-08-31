@@ -1,0 +1,25 @@
+; ================= RootCTrait : multi-batch pipeline =================
+; Batches to process: ALL (every batch defined below) or a list, e.g. batch1,batch2
+BATCHES=ALL
+
+; Root folders (masks in data/<batch>/, output in results/<batch>/)
+DATA_ROOT=data
+RESULTS_ROOT=results
+
+; --- Settings COMMON to all batches (kept identical for comparability) ---
+VOXEL=0.39,0.39,0.2
+PRUNE_VOX=5
+MIN_SEG_LEN_MM=2.0
+BC_MIN=3
+LIN_MAX=0.7
+LEN_MAX=15
+DROP_ORPHANS=1
+SAVE_FIGURES=1
+TIMEOUT=1800
+
+; --- Batch definitions: BATCH <name> | <file_pattern> | <axis_order optional> ---
+; <name> must match the subfolder in data/ ; {name} is the sample id (S1, S2, ...)
+; The file extension sets the format (.mat, .tif/.tiff, .npy/.npz, .nii/.nii.gz).
+; The 3rd field (axis order, e.g. 2,1,0) is optional; empty = none.
+BATCH batch1 | sample_{name}.mat |
+BATCH batch2 | scan{name}.tif    |

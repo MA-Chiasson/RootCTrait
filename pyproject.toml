@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rootctrait"
+version = "1.0.0"
+description = "Automated 3D root system architecture trait extraction from segmented CT volumes"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Marc-Antoine Chiasson" }]
+keywords = ["root phenotyping", "CT scan", "root system architecture", "plant genetics", "GWAS"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Intended Audience :: Science/Research",
+]
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "scikit-image>=0.20",
+    "h5py>=3.7",
+    "pandas>=1.5",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+figures = ["plotly>=5.10"]
+formats = ["tifffile", "nibabel"]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/MA-Chiasson/RootCTrait"
+Issues = "https://github.com/MA-Chiasson/RootCTrait/issues"
+
+[tool.setuptools]
+packages = ["rootctrait"]

@@ -1,0 +1,14 @@
+; Example configuration: processes the bundled synthetic root in example/roots/
+BATCHES=ALL
+DATA_ROOT=example
+RESULTS_ROOT=results
+VOXEL=0.39,0.39,0.2
+PRUNE_VOX=5
+MIN_SEG_LEN_MM=2.0
+BC_MIN=3
+LIN_MAX=0.7
+LEN_MAX=15
+DROP_ORPHANS=1
+SAVE_FIGURES=1
+TIMEOUT=600
+BATCH roots | sample_{name}.npy |
