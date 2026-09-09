@@ -93,8 +93,8 @@ COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm',
         ('NRL', 'compte', 1), ('NRL_court_<5', 'compte', 1), ('NRL_moyen_5_15', 'compte', 1),
         ('NRL_long_>15', 'compte', 1), ('PM', 'cm', .1), ('D50', 'cm', .1), ('D95', 'cm', .1),
         ('WX', 'cm', .1), ('WZ', 'cm', .1), ('LM', 'cm', .1), ('W25', 'cm', .1), ('W50', 'cm', .1),
-        ('W75', 'cm', .1), ('RLP', 'ratio', 1), ('ANGsys', 'deg', 1), ('ACRL', 'deg', 1),
-        ('ANGO2', 'deg', 1), ('ANGO2_sd', 'deg', 1), ('ANGO2_init', 'deg', 1),
+        ('W75', 'cm', .1), ('RLP', 'ratio', 1),
+        ('ANGO2', 'deg', 1), ('ANGO2_sd', 'deg', 1), ('ANGI', 'deg', 1),
         ('CHV', 'cm3', .001), ('VRT', 'cm3', .001), ('SRT', 'cm2', .01), ('IC', 'ratio', 1),
         ('SRL', 'cm/cm3', 100), ('NT', 'compte', 1), ('NBP', 'compte', 1), ('MaxO', 'compte', 1),
         ('DR', 'nb/cm', 1), ('NTR', 'compte', 1), ('IBD', 'cm', .1), ('DRP', 'mm', 1),
@@ -395,7 +395,7 @@ def list_samples(data_dir, pattern):
     return sorted(names, key=lambda s: int(re.sub(r'\D', '', s) or 0))
 
 
-def process_batch(batch):
+def process_batch(batch, should_stop=None):
     bname = batch['name']
     data_dir = os.path.join(DATA_ROOT, bname)
     res_dir = os.path.join(RESULTS_ROOT, bname)
@@ -421,6 +421,9 @@ def process_batch(batch):
     print(f"=== BATCH {bname} : {len(samples)} samples | {len(done)} already done | "
           f"{len(todo)} to do | pattern={batch['pattern']} | axis_order={batch['axis_order']} ===")
     for name in todo:
+        if should_stop is not None and should_stop():
+            print("  stopped by user (partial results saved)", flush=True)
+            break
         t0 = time.time()
         status, payload = run_with_timeout(name, ctx, TIMEOUT)
         if status == 'ok':

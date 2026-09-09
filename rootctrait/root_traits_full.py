@@ -49,6 +49,34 @@ def _angle_initial_vs_vertical(C, vs, mm=4.0):
     return float(np.degrees(np.arccos(np.clip(abs(d[0]) / n, -1.0, 1.0))))
 
 
+def _insertion_angle(seg, parent, vs, mm=4.0, win=6):
+    """Angle (deg) between the lateral's initial direction (first `mm` mm after its
+    insertion) and the local direction of its parent root at the attachment point.
+    0 = the lateral leaves in the parent's direction, 90 = perpendicular. This is
+    an emergence angle relative to the parent, independent of system orientation."""
+    C = seg['coords'].astype(float) * vs
+    if len(C) < 2:
+        return np.nan
+    cum = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))])
+    idx = int(np.searchsorted(cum, mm)); idx = max(1, min(idx, len(C) - 1))
+    d_lat = C[idx] - C[0]
+    nl = np.linalg.norm(d_lat)
+    Cp = parent['coords'].astype(float) * vs
+    if nl < 1e-9 or len(Cp) < 2:
+        return np.nan
+    d_lat = d_lat / nl
+    j = int(np.argmin(np.linalg.norm(Cp - C[0], axis=1)))     # attachment on parent
+    lo = max(0, j - win); hi = min(len(Cp), j + win + 1)
+    chunk = Cp[lo:hi]
+    if len(chunk) < 2:
+        return np.nan
+    X = chunk - chunk.mean(0)
+    d_par = np.linalg.svd(X, full_matrices=False)[2][0]
+    d_par = d_par / (np.linalg.norm(d_par) + 1e-9)
+    cos = abs(float(d_lat @ d_par))
+    return float(np.degrees(np.arccos(np.clip(cos, 0.0, 1.0))))
+
+
 def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full):
     vs = np.asarray(voxel_size, float)
     base = np.asarray(base_rcp, float)
@@ -126,33 +154,31 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T['W50'] = width_at(0.50)
     T['W75'] = width_at(0.75)
 
-    # ---- angles ----
+    # ---- angles of order-2 roots only (system framework) ----
+    # ANGO2 (mean order-2 angle to vertical) and ANGO2_sd (its dispersion) describe the
+    # inclination and regularity of the framework. Earlier variants to vertical
+    # (ANGsys, ACRL, ANGO2_init) were dropped as redundant with ANGO2 (see the angle
+    # correlation analysis); the insertion angle ANGI below adds an independent axis.
     angs = np.array([_angle_vs_vertical(s['coords'].astype(float) * vs) for s in segments])
     ok = ~np.isnan(angs)
-    T['ANGsys'] = float(np.average(angs[ok], weights=seglen[ok])) if ok.any() else np.nan
-    m_lat = lat & ok
-    T['ACRL'] = float(np.mean(angs[m_lat])) if m_lat.any() else np.nan
-
-    # ---- angles of order-2 roots only (system framework) ----
-    # Targets the overall shape of the system (compact vs spreading) using only the
-    # order-2 laterals (that branch off the pivot), excluding orders 3+ and the noise
-    # mixed into ACRL. Three variants for comparison:
-    #   ANGO2      : overall mean angle (start-to-end vector) vs vertical
-    #   ANGO2_sd   : standard deviation of these angles (framework regularity)
-    #   ANGO2_init : mean angle of the initial portion (4 mm) vs vertical
     ord2 = np.array([s['order'] == 2 for s in segments])
     m_o2 = ord2 & ok
     if m_o2.any():
         T['ANGO2'] = float(np.mean(angs[m_o2]))
         T['ANGO2_sd'] = float(np.std(angs[m_o2]))
-        angs_init = np.array([_angle_initial_vs_vertical(s['coords'], vs)
-                              for s in segments])
-        m_o2i = ord2 & ~np.isnan(angs_init)
-        T['ANGO2_init'] = float(np.mean(angs_init[m_o2i])) if m_o2i.any() else np.nan
     else:
         T['ANGO2'] = np.nan
         T['ANGO2_sd'] = np.nan
-        T['ANGO2_init'] = np.nan
+
+    # ---- ANGI: mean insertion angle of order-2 laterals relative to their parent ----
+    seg_by_id = {s['seg_id']: s for s in segments}
+    ins = []
+    for s in segments:
+        if s['order'] >= 2 and s.get('parent_seg', -1) in seg_by_id:
+            a = _insertion_angle(s, seg_by_id[s['parent_seg']], vs)
+            if not np.isnan(a):
+                ins.append(a)
+    T['ANGI'] = float(np.mean(ins)) if ins else np.nan
 
 
     # ---- convex hull ----
