@@ -1,12 +1,12 @@
-; ================= RootCTrait : multi-batch pipeline =================
-; Batches to process: ALL (every batch defined below) or a list, e.g. batch1,batch2
-BATCHES=ALL
+; ================= PIPELINE MULTI-BLOCS =================
+; Blocs a traiter : ALL (tous ceux definis plus bas) ou liste ex: B2T3,B5T3
+BATCHES=B2T3,B3T3,B5T3
 
-; Root folders (masks in data/<batch>/, output in results/<batch>/)
+; Racines des dossiers (data/<bloc>/ et results/<bloc>/)
 DATA_ROOT=data
 RESULTS_ROOT=results
 
-; --- Settings COMMON to all batches (kept identical for comparability) ---
+; ============== Reglages COMMUNS a tous les blocs (coherence GWAS) ==============
 VOXEL=0.39,0.39,0.2
 PRUNE_VOX=5
 MIN_SEG_LEN_MM=2.0
@@ -14,12 +14,23 @@ BC_MIN=3
 LIN_MAX=0.7
 LEN_MAX=15
 DROP_ORPHANS=1
-SAVE_FIGURES=1
+SAVE_FIGURES=0
 TIMEOUT=1800
 
-; --- Batch definitions: BATCH <name> | <file_pattern> | <axis_order optional> ---
-; <name> must match the subfolder in data/ ; {name} is the sample id (S1, S2, ...)
-; The file extension sets the format (.mat, .tif/.tiff, .npy/.npz, .nii/.nii.gz).
-; The 3rd field (axis order, e.g. 2,1,0) is optional; empty = none.
-BATCH batch1 | sample_{name}.mat |
-BATCH batch2 | scan{name}.tif    |
+; Nettoyage des orphelins saute au dessus de ce nombre de voxels racines (memoire).
+; Le saut est journalise dans la console pour rester tracable.
+ORPHAN_MAX_VOX=90000
+
+; Nombre d'echantillons traites en parallele. 1 = comportement serie (defaut).
+; Validez sur un seul bloc avant de monter (le timeout par echantillon est conserve).
+PARALLEL=1
+
+; ====== Definition des blocs : BLOC nom | pattern | axis_order(optionnel) ======
+; Le nom doit correspondre EXACTEMENT au sous-dossier dans data/
+; (BLOC et BATCH sont tous deux acceptes)
+BLOC B2T2 | B2T2{name}.mat |
+BLOC B3T2 | B3T2{name}.mat |
+BLOC B5T2 | B5T2{name}.mat |
+BLOC B2T3 | B2T3{name}.mat |
+BLOC B3T3 | B3T3{name}.mat |
+BLOC B5T3 | B5T3{name}.mat |

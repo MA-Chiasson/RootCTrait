@@ -42,7 +42,8 @@ from rootctrait.io_volume import load_volume
 
 def load_params(path):
     """Read params.txt. Returns (dict of simple keys, list of batches).
-    A batch is a line 'BATCH name | pattern | axis_order'."""
+    A batch is a line 'BATCH name | pattern | axis_order'. The French keyword
+    'BLOC' is accepted as an alias of 'BATCH'."""
     p = {}
     batches = []
     if os.path.exists(path):
@@ -51,9 +52,10 @@ def load_params(path):
                 line = line.strip()
                 if not line or line.startswith(';'):
                     continue
-                if line.upper().startswith('BATCH '):
-                    # BATCH name | pattern | axis_order(optional)
-                    body = line[6:]
+                up = line.upper()
+                if up.startswith('BATCH ') or up.startswith('BLOC '):
+                    # BATCH/BLOC name | pattern | axis_order(optional)
+                    body = line.split(None, 1)[1]
                     parts = [x.strip() for x in body.split('|')]
                     bname = parts[0]
                     pattern = parts[1] if len(parts) > 1 else ''
@@ -79,6 +81,11 @@ LEN_MAX = float(PARAMS.get('LEN_MAX', '15'))
 DROP_ORPHANS = PARAMS.get('DROP_ORPHANS', '1').lower() not in ('0', 'false', 'no')
 SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
 TIMEOUT = int(PARAMS.get('TIMEOUT', '1800'))
+# Max root-voxel count above which the (memory-heavy) orphan cleanup is skipped.
+# Exposed so the size-dependent behaviour is tunable and traceable, not a magic number.
+ORPHAN_MAX_VOX = int(PARAMS.get('ORPHAN_MAX_VOX', '90000'))
+# Number of samples processed concurrently. 1 = current serial behaviour (default).
+PARALLEL = int(PARAMS.get('PARALLEL', '1'))
 
 # Which batches to process
 _batch = PARAMS.get('BATCHES', 'ALL').strip()
@@ -118,13 +125,13 @@ def detect_base(sk, edt, voxel_size):
     return haut[np.argmax(rad)]
 
 
-def make_figure(name, kept, removed_segs, primary_path, fig_dir, hypocotyl=None,
+def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hypocotyl=None,
                 orphans=None, base=None, base2=None):
     try:
         import plotly.graph_objects as go
     except ImportError:
         return False
-    vs = np.asarray(VOXEL_SIZE)
+    vs = np.asarray(voxel_size)
 
     def lines(segs):
         x, y, z = [], [], []
@@ -233,28 +240,36 @@ def _extend_pivot(prim, sk, base, base2, voxel_size, marge=15):
 
 
 def process(name, ctx):
+    # All processing parameters travel through ctx (pickled to the worker), so
+    # they reach the child process even under the 'spawn' start method (Windows,
+    # macOS), where module globals set by the caller are NOT inherited.
+    voxel_size = tuple(ctx['voxel_size'])
     path = os.path.join(ctx['data_dir'], ctx['pattern'].format(name=name))
-    V = load_volume(path, axis_order=ctx['axis_order'])
-    BW = V > (0.5 * np.max(V))
-    c = np.argwhere(BW); mn = c.min(0); mx = c.max(0); m = 6
+    V = load_volume(path, axis_order=ctx['axis_order'], var_name=ctx.get('var_name'))
+    vmax = float(np.max(V)) if V.size else 0.0
+    BW = V > (0.5 * vmax)
+    c = np.argwhere(BW)
+    if c.size == 0:
+        raise ValueError(f"empty mask (no voxel above threshold) for '{name}'")
+    mn = c.min(0); mx = c.max(0); m = 6
     BW = BW[tuple(slice(max(0, mn[i] - m), mx[i] + m) for i in range(3))]
-    edt = ndimage.distance_transform_edt(BW, sampling=VOXEL_SIZE)
+    edt = ndimage.distance_transform_edt(BW, sampling=voxel_size)
     sk = skeletonize(BW).astype(bool)
-    sk = prune_skeleton(sk, min_branch_length_vox=PRUNE_VOX)
-    base = detect_base(sk, edt, VOXEL_SIZE)
+    sk = prune_skeleton(sk, min_branch_length_vox=ctx['prune_vox'])
+    base = detect_base(sk, edt, voxel_size)
     segs, prim, voxels, border, bnode = decompose_root_system(
-        sk, base, list(VOXEL_SIZE), dist_map=edt,
-        min_seg_len_mm=MIN_SEG_LEN_MM, crown_exclude_mm=0.0)
+        sk, base, list(voxel_size), dist_map=edt,
+        min_seg_len_mm=ctx['min_seg_len_mm'], crown_exclude_mm=0.0)
     n_brut = len(segs)
-    kept, removed_segs, feats = decontaminate(segs, voxels, VOXEL_SIZE, base=base,
-                                              bc_min=BC_MIN, lin_max=LIN_MAX, len_max=LEN_MAX,
-                                              drop_orphans=DROP_ORPHANS)
+    kept, removed_segs, feats = decontaminate(segs, voxels, voxel_size, base=base,
+                                              bc_min=ctx['bc_min'], lin_max=ctx['lin_max'], len_max=ctx['len_max'],
+                                              drop_orphans=ctx['drop_orphans'])
     n_ret = len(removed_segs)
     # --- Bounded collar + hypocotyl (refined version) ---
     # base2 = collar raised along the thick column up to the hypocotyl (start of the
     # pivot at the true top of the fleshy base). hypo_ids = vertical column + the
     # branches hanging high on the stem; horizontal roots at collar level stay roots.
-    base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, VOXEL_SIZE)
+    base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, voxel_size)
     roots = [s for s in kept if s['seg_id'] not in hypo_ids]
     hypocotyl = [s for s in kept if s['seg_id'] in hypo_ids]
     # Orphan cleanup: a single call to the existing function, after removing the
@@ -262,20 +277,25 @@ def process(name, ctx):
     # (keep_base_component builds a tree of all voxels).
     orphans = []
     nvox_roots = sum(len(s['coords']) for s in roots)
-    if roots and nvox_roots <= 90000:
+    orphan_max = ctx.get('orphan_max_vox', 90000)
+    if roots and nvox_roots <= orphan_max:
         try:
             roots, orphans = keep_base_component(roots, base)
         except Exception:
             orphans = []
+    elif roots and nvox_roots > orphan_max:
+        # Cleanup skipped to bound memory. Logged so that size-dependent processing
+        # (a potential confound for GWAS) stays visible and auditable.
+        print(f"  {name:6s} orphan cleanup SKIPPED (roots={nvox_roots} vox > {orphan_max})", flush=True)
     # Pivot extended up to the raised collar, so that the pivot length (LRP) starts
     # at base2 (the true start of the primary root).
-    prim2 = _extend_pivot(prim, sk, base, base2, VOXEL_SIZE)
+    prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
-    if SAVE_FIGURES:
-        make_figure(name, roots, removed_segs, prim2, ctx['fig_dir'],
+    if ctx['save_figures']:
+        make_figure(name, roots, removed_segs, prim2, ctx['fig_dir'], voxel_size,
                     hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2)
     # base2 = reference collar for the traits (depths, LRP, angles).
-    T = compute_all_traits(roots, prim2, base2, BW, edt, VOXEL_SIZE, skv_clean)
+    T = compute_all_traits(roots, prim2, base2, BW, edt, voxel_size, skv_clean)
     return n_brut, n_ret, T
 
 
@@ -392,7 +412,118 @@ def list_samples(data_dir, pattern):
     for fp in glob.glob(os.path.join(data_dir, pre + '*' + suf)):
         b = os.path.basename(fp)
         names.append(b[len(pre):len(b) - len(suf)] if suf else b[len(pre):])
-    return sorted(names, key=lambda s: int(re.sub(r'\D', '', s) or 0))
+    return sorted(names, key=lambda s: (int(re.findall(r'\d+', s)[-1]) if re.findall(r'\d+', s) else 0, s))
+
+
+def _effective_params():
+    """Snapshot of the current processing parameters (module globals, which the
+    caller -- CLI via params.txt, or the GUI via pipeline_api._apply -- has set).
+    This snapshot is what gets pickled to the workers, so the settings are honored
+    identically under 'fork' and 'spawn'."""
+    return {
+        'voxel_size': tuple(VOXEL_SIZE),
+        'prune_vox': PRUNE_VOX,
+        'min_seg_len_mm': MIN_SEG_LEN_MM,
+        'bc_min': BC_MIN,
+        'lin_max': LIN_MAX,
+        'len_max': LEN_MAX,
+        'drop_orphans': DROP_ORPHANS,
+        'save_figures': SAVE_FIGURES,
+        'orphan_max_vox': ORPHAN_MAX_VOX,
+    }
+
+
+def _append_failure(path, rec):
+    """Append one failure record (timeout or error) to the batch failures log."""
+    try:
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec) + '\n')
+    except Exception:
+        pass
+
+
+def _handle_result(name, status, payload, t0, store, checkpoint, failures_path):
+    """Record and print the outcome of one sample. Shared by the serial and the
+    parallel runners so both behave identically."""
+    dt = time.time() - t0
+    if status == 'ok':
+        nb, nr, T = payload
+        rec = {'name': name, 'n_brut': nb, 'n_ret': nr, 'T': _clean_T(T)}
+        store[name] = rec
+        append_store(checkpoint, rec)
+        lrp = T.get('LRP') if isinstance(T, dict) else None
+        nrl = T.get('NRL') if isinstance(T, dict) else None
+        lrp_s = f"{lrp/10:.1f}cm" if isinstance(lrp, (int, float)) else "NA"
+        nrl_s = f"{nrl}" if nrl is not None else "NA"
+        pct = 100 * nr / max(1, nb)
+        print(f"  {name:6s} raw={nb:4d} removed={nr:4d} ({pct:3.0f}%) "
+              f"LRP={lrp_s} NRL={nrl_s}  [{dt:.0f}s]", flush=True)
+    elif status == 'timeout':
+        _append_failure(failures_path, {'name': name, 'status': 'timeout',
+                                        'msg': f'exceeded {TIMEOUT}s',
+                                        'at': time.strftime('%Y-%m-%d %H:%M:%S')})
+        print(f"  {name:6s} TIMEOUT after {TIMEOUT}s (will be retried)", flush=True)
+    else:
+        _append_failure(failures_path, {'name': name, 'status': 'error',
+                                        'msg': str(payload),
+                                        'at': time.strftime('%Y-%m-%d %H:%M:%S')})
+        print(f"  {name:6s} ERREUR {payload} (sera reessaye)", flush=True)
+
+
+def _run_parallel(todo, ctx, store, checkpoint, failures_path, nworkers, should_stop):
+    """Process samples with at most `nworkers` concurrent one-shot processes.
+    Each sample still runs in its own process, so the per-sample timeout-kill is
+    preserved; results are harvested and written to the checkpoint by THIS (single)
+    parent process, so no checkpoint locking is needed."""
+    active = {}  # name -> (proc, queue, t0)
+    it = iter(todo)
+    stopping = False
+
+    def _launch(nm):
+        q = mp.Queue()
+        p = mp.Process(target=_worker, args=(nm, ctx, q))
+        p.start()
+        active[nm] = (p, q, time.time())
+
+    try:
+        while len(active) < nworkers:
+            _launch(next(it))
+    except StopIteration:
+        pass
+
+    while active:
+        if not stopping and should_stop is not None and should_stop():
+            stopping = True
+            print("  stop requested: terminating active tasks (partial results saved)", flush=True)
+        finished = []
+        for nm, (p, q, t0) in list(active.items()):
+            if not p.is_alive():
+                try:
+                    status, payload = q.get(timeout=5)
+                except Exception:
+                    status, payload = 'err', 'process ended without returning a result'
+                p.join()
+                _handle_result(nm, status, payload, t0, store, checkpoint, failures_path)
+                finished.append(nm)
+            elif time.time() - t0 > TIMEOUT:
+                p.terminate(); p.join()
+                _handle_result(nm, 'timeout', None, t0, store, checkpoint, failures_path)
+                finished.append(nm)
+        for nm in finished:
+            del active[nm]
+        if stopping:
+            for nm, (p, q, t0) in list(active.items()):
+                if p.is_alive():
+                    p.terminate(); p.join()
+            active.clear()
+            break
+        try:
+            while len(active) < nworkers:
+                _launch(next(it))
+        except StopIteration:
+            pass
+        if active:
+            time.sleep(0.2)
 
 
 def process_batch(batch, should_stop=None):
@@ -402,10 +533,13 @@ def process_batch(batch, should_stop=None):
     os.makedirs(res_dir, exist_ok=True)
     out_xlsx = os.path.join(res_dir, f"traits_{bname}.xlsx")
     checkpoint = os.path.join(res_dir, 'checkpoint_traits.jsonl')
+    failures_path = os.path.join(res_dir, 'failures.jsonl')
     fig_dir = os.path.join(res_dir, 'figures')
 
+    eff = _effective_params()
     ctx = {'data_dir': data_dir, 'pattern': batch['pattern'],
-           'axis_order': batch['axis_order'], 'fig_dir': fig_dir}
+           'axis_order': batch['axis_order'], 'fig_dir': fig_dir,
+           'var_name': batch.get('var_name'), **eff}
 
     if not os.path.isdir(data_dir):
         print(f"[{bname}] folder not found: {data_dir} -- batch skipped.\n")
@@ -415,28 +549,41 @@ def process_batch(batch, should_stop=None):
         print(f"[{bname}] no file matching {batch['pattern']} in {data_dir} -- skipped.\n")
         return
 
+    # Trace of the exact settings used for this batch (reproducibility / methods).
+    params_used = dict(eff)
+    params_used['voxel_size'] = list(VOXEL_SIZE)
+    params_used.update({
+        'batch': bname,
+        'data_dir': os.path.abspath(data_dir),
+        'pattern': batch['pattern'],
+        'axis_order': list(batch['axis_order']) if batch['axis_order'] else None,
+        'timeout': TIMEOUT,
+        'parallel': PARALLEL,
+        'generated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+    })
+    try:
+        with open(os.path.join(res_dir, 'params_used.json'), 'w', encoding='utf-8') as f:
+            json.dump(params_used, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[{bname}] could not write params_used.json: {e}")
+
     store = load_store(checkpoint)
     done = [s for s in samples if s in store]
     todo = [s for s in samples if s not in store]
+    nworkers = max(1, int(PARALLEL))
+    mode = "serial" if nworkers == 1 else f"parallel x{nworkers}"
     print(f"=== BATCH {bname} : {len(samples)} samples | {len(done)} already done | "
-          f"{len(todo)} to do | pattern={batch['pattern']} | axis_order={batch['axis_order']} ===")
-    for name in todo:
-        if should_stop is not None and should_stop():
-            print("  stopped by user (partial results saved)", flush=True)
-            break
-        t0 = time.time()
-        status, payload = run_with_timeout(name, ctx, TIMEOUT)
-        if status == 'ok':
-            nb, nr, T = payload
-            rec = {'name': name, 'n_brut': nb, 'n_ret': nr, 'T': _clean_T(T)}
-            store[name] = rec
-            append_store(checkpoint, rec)
-            print(f"  {name:6s} raw={nb:4d} removed={nr:4d} ({100*nr/max(1,nb):3.0f}%) "
-                  f"LRP={T['LRP']/10:.1f}cm NRL={T['NRL']}  [{time.time()-t0:.0f}s]", flush=True)
-        elif status == 'timeout':
-            print(f"  {name:6s} TIMEOUT after {TIMEOUT}s (will be retried)", flush=True)
-        else:
-            print(f"  {name:6s} ERREUR {payload} (sera reessaye)", flush=True)
+          f"{len(todo)} to do | {mode} | pattern={batch['pattern']} | axis_order={batch['axis_order']} ===")
+    if nworkers == 1:
+        for name in todo:
+            if should_stop is not None and should_stop():
+                print("  stopped by user (partial results saved)", flush=True)
+                break
+            t0 = time.time()
+            status, payload = run_with_timeout(name, ctx, TIMEOUT)
+            _handle_result(name, status, payload, t0, store, checkpoint, failures_path)
+    else:
+        _run_parallel(todo, ctx, store, checkpoint, failures_path, nworkers, should_stop)
     results = [(s, store[s]['n_brut'], store[s]['n_ret'], store[s]['T']) for s in samples if s in store]
     title = f"Root traits - {bname} - after decontamination (cleaned skeleton)"
     write_excel(results, out_xlsx, title)

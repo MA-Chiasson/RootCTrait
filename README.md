@@ -15,12 +15,53 @@ of samples), each in its own folder, and writes one Excel table per batch.
 
 ---
 
+## Contents
+
+- [Two ways to run RootCTrait](#two-ways-to-run-rootctrait)
+- [Processing overview](#processing-overview)
+- [Expected input](#expected-input)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [The desktop app (RootCTraitV3)](#the-desktop-app-rootctraitv3)
+- [The command line](#the-command-line)
+- [Configuration reference](#configuration-reference)
+- [Worked examples](#worked-examples)
+- [Output files](#output-files)
+- [Performance and parallel processing](#performance-and-parallel-processing)
+- [Reproducibility](#reproducibility)
+- [Troubleshooting](#troubleshooting)
+- [Notes for downstream analysis (GWAS)](#notes-for-downstream-analysis-gwas)
+- [Repository structure](#repository-structure)
+- [Known limitations](#known-limitations)
+- [Credits, citation, license](#credits-and-acknowledgments)
+
+---
+
+## Two ways to run RootCTrait
+
+RootCTrait has one engine (`run_pipeline.py` and the `rootctrait/` package) and
+two front ends that share it:
+
+1. **The desktop app, RootCTraitV3** (`rootctrait_app.py`): a graphical interface
+   where you import your batch folders, set parameters, and watch a live console
+   with a progress bar. Best for day-to-day work and visual review.
+2. **The command line** (`python run_pipeline.py`): driven entirely by a
+   `params.txt` file. Best for reproducible, scriptable runs on a server or an HPC
+   node, and for the exact settings you report in a paper.
+
+Both call the same processing code, so the traits they produce are identical for
+identical settings. Pick whichever fits the moment; you can even start in the app
+and finish on a server.
+
+---
+
 ## Processing overview
 
 For each sample:
 
 1. **Load** the volume (multi-format, see below), binarize (`V > 0.5 * max(V)`)
-   and crop to the bounding box.
+   and crop to the bounding box. An empty mask (no voxel above the threshold) is
+   reported as an error and skipped, so one bad file never stops a batch.
 2. **Skeletonize** and prune short spurious branches.
 3. **Detect the collar** at the thickest point of the upper region, then **raise
    it** along the thick base column, stopping at the hypocotyl.
@@ -30,13 +71,17 @@ For each sample:
 6. **Identify and exclude the hypocotyl** (vertical stem column above the collar
    plus the branches hanging high on it); basal roots at collar level are kept.
 7. **Orphan cleanup**: after the hypocotyl is removed, one connectivity pass drops
-   any detached fragment.
+   any detached fragment. This pass is memory-bounded: above `ORPHAN_MAX_VOX`
+   root voxels it is skipped and the skip is logged, so any size-dependent
+   difference stays visible and auditable.
 8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
    the reference point; the primary root is traced continuously from the raised
    collar following the real skeleton path.
 
 A resume mechanism (`checkpoint_traits.jsonl`, per batch) lets you interrupt and
 restart without recomputing everything.
+
+---
 
 ## Expected input
 
@@ -45,7 +90,7 @@ grayscale CT volume. A multi-label segmentation must be reduced to the root labe
 beforehand.
 
 Axis convention: `col0 = Y (depth)`, `col1 = X`, `col2 = Z`. The default voxel
-size is `0.39, 0.39, 0.2` mm (configurable in `params.txt`).
+size is `0.39, 0.39, 0.2` mm (configurable).
 
 ### Supported formats
 
@@ -64,8 +109,10 @@ variables, the largest 3D array is used.
 ### Axis orientation
 
 If a loaded volume is not in the order `col0 = depth`, set the optional axis order
-on the batch line in `params.txt` (for example `2,1,0`), then check on the produced
+(for example `2,1,0`) on the batch line in `params.txt`, then check on the produced
 HTML figure that depth points downward.
+
+---
 
 ## Installation
 
@@ -75,96 +122,183 @@ cd RootCTrait
 pip install -r requirements.txt        # simplest: just the dependencies
 ```
 
-Then run the pipeline from the repo folder with `python run_pipeline.py`.
-
-Python 3.10 or newer recommended. If you also want to use RootCTrait as a library
-from your own scripts (`import rootctrait`), install the package instead:
+Python 3.10 or newer is recommended. If you also want to use RootCTrait as a
+library from your own scripts (`import rootctrait`), install the package instead:
 
 ```bash
 pip install -e .        # dependencies + the importable rootctrait package
 ```
 
-## Try it on the bundled example
+Dependencies: numpy, scipy, scikit-image, h5py, pandas, openpyxl, plotly
+(see `requirements.txt`). The desktop app additionally uses Tkinter, which ships
+with standard Python, and installs `tkinterdnd2` on first launch for drag-and-drop.
 
-A small synthetic root system is included so you can run the whole pipeline in a
-few seconds without any data of your own:
+---
 
-```bash
-python run_pipeline.py            # uses params.txt
-# or, explicitly, the bundled example:
-PARAMS=params_example.txt python run_pipeline.py
-```
+## Quick start
 
-This processes `example/roots/sample_S1.npy` and writes
-`results/roots/traits_roots.xlsx` plus a 3D figure.
-
-## Tests
-
-Invariant tests run the pipeline on the bundled example and check the
-internal-consistency rules (TRL >= LRP, IC <= 1, NRL = sum of length classes,
-angles in [0, 90], no NaN in core traits):
+### With the desktop app
 
 ```bash
-pytest -q            # or: python tests/test_invariants.py
+python rootctrait_app.py
 ```
 
-## Folder layout
+Then: **Import Folders** to add your batch folders, **Parameters** to choose the
+output folder, and **Analyse** to run. Details in
+[The desktop app](#the-desktop-app-rootctraitv3).
 
+### With the command line
+
+```bash
+python run_pipeline.py            # reads params.txt in the same folder
 ```
-data/<batch>/       the masks of this batch
-results/<batch>/    output for this batch (created automatically):
-                    traits_<batch>.xlsx, figures/, checkpoint_traits.jsonl
+
+Point it at a different config with the `PARAMS` environment variable (here the
+bundled synthetic example, which runs out of the box):
+
+```bash
+PARAMS=example/params_example.txt python run_pipeline.py
 ```
 
-Run `bash makeDir.sh` to create `data/` and `results/`.
+---
 
-## Configuration
+## The desktop app (RootCTraitV3)
 
-All settings are in `params.txt`, read by `run_pipeline.py` (same folder).
+Launch it with `python rootctrait_app.py`. The window has two tabs.
 
-| Key                            | Role                                                       |
-|--------------------------------|------------------------------------------------------------|
-| `BATCHES`                      | `ALL`, or a comma-separated list of batch names            |
-| `DATA_ROOT`, `RESULTS_ROOT`    | root folders for input and output                          |
-| `VOXEL`                        | voxel size in mm, order Y,X,Z                              |
-| `PRUNE_VOX`, `MIN_SEG_LEN_MM`  | skeleton pruning and minimum segment length               |
-| `BC_MIN`, `LIN_MAX`, `LEN_MAX` | decontamination rule parameters                            |
-| `DROP_ORPHANS`, `SAVE_FIGURES` | remove floating fragments; write HTML figures (1/0)        |
-| `TIMEOUT`                      | per-sample time limit (seconds)                            |
+### Analysis tab
 
-Each batch is one line:
+The workflow reads left to right:
+
+- **New Session**: clears the queue, the console and the saved workspace, and
+  forgets the last parent folder, so the next Import Folders opens empty.
+- **Import Folders**: opens a picker. Click **Browse Parent Folder** to choose the
+  folder that contains your batches (for example `data`), then tick the batch
+  subfolders you want in the queue. Each ticked folder becomes one batch, named
+  after the folder.
+- **Parameters**: opens the settings window (see below). You must choose an
+  **output folder** here before you can analyse; until you do, the status reads
+  `Set output folder in Parameters`.
+- **Analyse / Stop**: start or stop processing. Progress, a percentage and an ETA
+  appear on the progress bar; every sample prints a line in the live console.
+- **Save Console Log**: writes the console text to a file.
+
+The queue table shows each batch, its folder path and its status. The session
+(queue, parameters, last parent folder) is saved automatically and restored the
+next time you open the app.
+
+### Parameters window
+
+Fields marked `*` are required. The one you must set is the **output folder
+(results root)**; the rest have sensible defaults.
+
+| Field                        | Meaning                                             |
+|------------------------------|-----------------------------------------------------|
+| Output folder (results root) | where `results/<batch>/` is written (required)      |
+| Voxel size (depth,x,z) mm    | physical voxel size, order Y,X,Z                    |
+| File name pattern            | how sample files are named, with `{name}` as the id |
+| Prune length (voxels)        | skeleton pruning length                             |
+| Min segment length (mm)      | shortest segment kept                               |
+| Sheet: parallel neighbours   | decontamination `BC_MIN`                            |
+| Sheet: max linearity         | decontamination `LIN_MAX`                           |
+| Sheet: max length (mm)       | decontamination `LEN_MAX`                           |
+| Timeout per sample (s)       | per-sample time limit                               |
+| Drop orphan fragments        | remove detached fragments (on/off)                  |
+| Save 3D figures              | write the interactive HTML figures (on/off)         |
+
+You can save the current settings as a named **parameter set** and reload it
+later (the output folder is deliberately not stored in a preset, since it changes
+from run to run). `ORPHAN_MAX_VOX` and `PARALLEL` have no dedicated field; the app
+inherits them from `params.txt` at startup, so set those there if you need them.
+
+### Tools tab
+
+Utilities that act on an existing `results` folder. The **Table format** selector
+(both / xlsx / csv) applies to the tools that write tables. Hover any button for a
+short description.
+
+- **Merge batches**: merges the trait tables of all batches into one combined file.
+- **Extract checkpoints**: rebuilds trait tables straight from the `.h5`
+  checkpoints, without rerunning the analysis.
+- **Figure report**: builds an HTML report of the interactive 3D Plotly figures,
+  sorted by batch and in numerical order, for visual validation.
+- **Delete checkpoints**: deletes the `.h5` checkpoints of a results folder to
+  start over; progress is reset to 0 and the analysis restarts from the beginning.
+
+---
+
+## The command line
+
+`python run_pipeline.py` reads all its settings from `params.txt` in the same
+folder (or the file named by the `PARAMS` environment variable). The file has two
+kinds of lines: `KEY=value` settings, and one `BATCH` (or `BLOC`) line per batch.
+
+```bash
+python run_pipeline.py                              # uses params.txt
+PARAMS=example/params_example.txt python run_pipeline.py   # uses a named config
+```
+
+Nothing else is needed; the folders in `results/` are created automatically.
+
+---
+
+## Configuration reference
+
+All settings live in `params.txt`. Keys are case-insensitive.
+
+| Key             | Default        | Role                                                        |
+|-----------------|----------------|------------------------------------------------------------|
+| `BATCHES`       | `ALL`          | `ALL`, or a comma-separated list of batch names to process |
+| `DATA_ROOT`     | `data`         | root folder holding `data/<batch>/`                        |
+| `RESULTS_ROOT`  | `results`      | root folder for `results/<batch>/`                         |
+| `VOXEL`         | `0.39,0.39,0.2`| voxel size in mm, order Y (depth), X, Z                     |
+| `PRUNE_VOX`     | `5`            | skeleton pruning length (voxels)                           |
+| `MIN_SEG_LEN_MM`| `2.0`          | shortest segment kept (mm)                                 |
+| `BC_MIN`        | `3`            | decontamination: min parallel neighbours for a sheet       |
+| `LIN_MAX`       | `0.7`          | decontamination: max linearity for a sheet                 |
+| `LEN_MAX`       | `15`           | decontamination: max length for a sheet (mm)               |
+| `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
+| `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
+| `TIMEOUT`       | `1800`         | per-sample time limit (seconds)                            |
+| `ORPHAN_MAX_VOX`| `90000`        | skip the orphan cleanup above this many root voxels        |
+| `PARALLEL`      | `1`            | number of samples processed concurrently (1 = serial)      |
+
+The processing settings above the batch lines are **shared by every batch**, which
+is what keeps traits comparable across the whole population for GWAS.
+
+### Defining batches
+
+One line per batch, with the `BATCH` keyword (or its French alias `BLOC`):
 
 ```
 BATCH <name> | <file_pattern> | <axis_order optional>
 ```
 
-`<name>` must match the subfolder in `data/`; `{name}` in the pattern is the
-sample id; the extension sets the format. Example:
+- `<name>` must match the subfolder in `data/` exactly.
+- `{name}` in the pattern is the sample id; the extension sets the format.
+- `<axis_order>` is optional (for example `2,1,0`); leave it empty for no
+  permutation.
+
+Example (equivalent lines, `BATCH` and `BLOC` are interchangeable):
 
 ```
 BATCH batch1 | sample_{name}.mat |
-BATCH batch2 | scan{name}.tif    |
+BLOC  B2T2   | B2T2{name}.mat    |
+BLOC  B3T3   | B3T3{name}.tif    | 2,1,0
 ```
 
-Processing settings above the batch lines are shared by every batch, which keeps
-traits comparable across the whole population.
+Choose which of the defined batches to run with `BATCHES`:
 
-## Usage
-
-Put your masks in `data/<batch>/`, edit `params.txt`, then run
-`python run_pipeline.py`. Three worked examples:
-
-### Example 1: the bundled synthetic example
-
-Runs out of the box, no data of your own needed:
-
-```bash
-PARAMS=params_example.txt python run_pipeline.py
+```
+BATCHES=ALL            ; every batch defined below
+BATCHES=B2T3,B5T3      ; only these two
 ```
 
-Output goes to `results/roots/traits_roots.xlsx` plus a 3D figure.
+---
 
-### Example 2: one batch of your own scans
+## Worked examples
+
+### Example 1: one batch, from the command line
 
 Layout:
 
@@ -182,6 +316,7 @@ data/
 DATA_ROOT=data
 RESULTS_ROOT=results
 BATCHES=ALL
+VOXEL=0.39,0.39,0.2
 BATCH mybatch | scan_{name}.mat |
 ```
 
@@ -191,87 +326,170 @@ python run_pipeline.py
 
 Output: `results/mybatch/traits_mybatch.xlsx` and `results/mybatch/figures/`.
 
-### Example 3: several batches at once
+### Example 2: several batches at once
 
-One subfolder per batch, one `BATCH` line each; a single run processes them all
-with identical settings (so the traits stay comparable across batches):
+One subfolder per batch, one batch line each; a single run processes them all with
+identical settings, so the traits stay comparable across batches:
 
 ```
 data/
-  march/   scan_S1.mat scan_S2.mat ...
-  april/   scan_S1.mat scan_S2.mat ...
-  june/    scan_S1.mat scan_S2.mat ...
+  B2T2/  B2T2S1.mat B2T2S2.mat ...
+  B3T2/  B3T2S1.mat B3T2S2.mat ...
+  B5T2/  B5T2S1.mat B5T2S2.mat ...
 ```
 
 ```
 BATCHES=ALL
-BATCH march | scan_{name}.mat |
-BATCH april | scan_{name}.mat |
-BATCH june  | scan_{name}.mat |
+BLOC B2T2 | B2T2{name}.mat |
+BLOC B3T2 | B3T2{name}.mat |
+BLOC B5T2 | B5T2{name}.mat |
 ```
 
 ```bash
 python run_pipeline.py
 ```
 
-Output: `results/march/`, `results/april/`, `results/june/`, each with its own
-trait table and figures. Set `BATCHES=march,june` to process only some of them.
+Output: `results/B2T2/`, `results/B3T2/`, `results/B5T2/`, each with its own trait
+table, figures, and a `params_used.json`. Set `BATCHES=B2T2,B5T2` to process only
+some of them.
 
-To review all the figures across batches and rate them (Good / Doubtful / Bad,
-with a CSV export):
+### Example 3: run several batches faster (parallel)
 
-```bash
-python generer_rapport_figures.py   # writes results/rapport_figures.html
+Process four samples at a time. Every sample still runs in its own process, so the
+per-sample timeout still applies:
+
+```
+PARALLEL=4
+BATCHES=ALL
+BLOC B2T3 | B2T3{name}.mat |
+BLOC B3T3 | B3T3{name}.mat |
+BLOC B5T3 | B5T3{name}.mat |
 ```
 
-### Keeping your folder tidy
+```bash
+python run_pipeline.py
+```
 
-Only `data/` and `results/` grow as you use the tool, and both are ignored by
-git, so a clone stays clean. If you would rather keep the code folder untouched,
-point `DATA_ROOT` and `RESULTS_ROOT` at folders anywhere on your machine
-(absolute paths are allowed).
+Validate `PARALLEL` on one batch first, then scale up. See
+[Performance](#performance-and-parallel-processing).
 
-## Output
+### Example 4: resume after an interruption
+
+If a run is stopped (Ctrl-C, a crash, or **Stop** in the app), just launch it
+again. Samples already in `checkpoint_traits.jsonl` are skipped and only the rest
+are processed:
+
+```bash
+python run_pipeline.py        # picks up where it left off
+```
+
+To force a full recompute of a batch, delete its `checkpoint_traits.jsonl` (or use
+**Delete checkpoints** in the app), then run again.
+
+### Example 5: data and results anywhere on disk
+
+Absolute paths are allowed, so the code folder can stay clean:
+
+```
+DATA_ROOT=/mnt/scans/soybean_masks
+RESULTS_ROOT=/mnt/analysis/rootctrait_out
+```
+
+### Example 6: the Tools, from the command line
+
+The same utilities exposed in the app's Tools tab can run standalone:
+
+```bash
+python -m tools.generer_rapport_figures     # writes results/rapport_figures.html
+python -m tools.merge_batches --format both # merges all batch tables into one file
+python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
+```
+
+---
+
+## Output files
 
 For each batch, in `results/<batch>/`:
 
-- `traits_<batch>.xlsx`: trait table, one row per sample (lengths in cm, diameters
-  in mm, volumes in cm3, angles in degrees).
-- `figures/<sample>.html`: interactive 3D view. Pivot (black, from the raised
+- **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
+  diameters in mm, volumes in cm3, angles in degrees). Columns `n_brut`,
+  `n_retire` and `%retire` report the decontamination.
+- **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
   collar), kept laterals (blue), removed pollution (red), hypocotyl (orange,
-  excluded), detached orphans (grey), original collar (green) and raised collar
+  excluded), detached orphans (grey), original collar (green), raised collar
   (purple diamond).
-- `checkpoint_traits.jsonl`: resume state (delete to recompute).
+- **`checkpoint_traits.jsonl`**: resume state (delete to recompute).
+- **`params_used.json`**: the exact settings used for this batch (voxel, pruning,
+  decontamination thresholds, timeout, parallel, orphan threshold, data folder,
+  timestamp). Keep it with your results for reproducibility and the methods
+  section of a paper.
+- **`failures.jsonl`**: one line per sample that timed out or errored, with the
+  name, the failure type, the message and a timestamp. Empty or absent when
+  everything succeeds; a quick way to see what needs attention.
 
 See [`docs/traits.md`](docs/traits.md) for the full trait list with definitions
 and units.
 
-### Visual quality control
+---
 
-`generer_rapport_figures.py` builds a single `rapport_figures.html` index to review
-every 3D figure without loading them all at once, with Good / Doubtful / Bad
-buttons and a free note per sample, and a CSV export of the judgments. Run it from
-the root after processing:
+## Performance and parallel processing
 
-```bash
-python generer_rapport_figures.py
-```
+By default `PARALLEL=1`: samples are processed one at a time. This is the safe,
+proven mode and the recommended default for a final production run.
 
-## Validation on synthetic phantoms
+Set `PARALLEL=N` to process N samples concurrently. The scheduler keeps at most N
+processes alive, and because each sample still runs in its own process, the
+per-sample timeout-kill is preserved and the checkpoint is written by the single
+parent process (no locking, no corruption). A good starting point is the number of
+physical cores minus one.
 
-Because there is no ground truth for real 3D roots, accuracy is assessed on
-synthetic root phantoms of known geometry (known total length, number of laterals,
-and branching angles). The pipeline is run on each phantom and the measured traits
-are compared to the true values:
+Guidance:
 
-```bash
-python validation/validate_phantoms.py    # writes validation/phantom_results.csv
-```
+- **Validate first.** Run one batch with your chosen `PARALLEL` and confirm the
+  trait table matches a serial run before relying on it at scale.
+- Serial and parallel produce the **same set of results**; only the wall-clock
+  time differs.
+- Very large single systems are memory-heavy; if you see memory pressure, lower
+  `PARALLEL` or raise per-sample limits.
 
-On the six bundled phantoms the mean absolute error is about **2% for primary root
-length, 2% for total root length, 0% for the number of laterals (recovered exactly),
-and 5% for the order-2 branching angle**. This measures the recovery accuracy of the
-pipeline itself, independently of any upstream segmentation.
+---
+
+## Reproducibility
+
+Every batch writes a `params_used.json` capturing the effective settings for that
+run. Because all processing parameters travel with each sample to its worker
+process, the settings are honored identically whether Python uses the `fork`
+(Linux) or `spawn` (Windows, macOS) start method: what you set in the app or in
+`params.txt` is exactly what the computation uses.
+
+For a citable, frozen configuration, keep the `params.txt` (or the relevant
+`params_*.txt`) alongside your results, together with the `params_used.json` files.
+
+---
+
+## Troubleshooting
+
+- **"No batch to process."** The `BATCHES` list is empty, or no `BATCH`/`BLOC`
+  line matched. Check that each batch name matches a subfolder in `DATA_ROOT`, and
+  that the batch lines use `BATCH` or `BLOC` (both are accepted).
+- **"no file matching ... "** The `{name}` pattern or the extension does not match
+  the files in the batch folder. Check the pattern against a real filename.
+- **`empty mask` error for a sample.** The file has no voxel above the binarization
+  threshold (empty or non-binary input). It is skipped and logged in
+  `failures.jsonl`; the rest of the batch continues.
+- **`orphan cleanup SKIPPED` in the console.** The sample exceeded `ORPHAN_MAX_VOX`
+  root voxels, so the memory-heavy cleanup was skipped. If many samples show this,
+  raise `ORPHAN_MAX_VOX` (watch memory) or ask for the low-memory connected-
+  components variant.
+- **Timeouts.** Increase `TIMEOUT`, or lower `PARALLEL` if the machine is
+  oversubscribed. Timed-out samples are retried on the next run and recorded in
+  `failures.jsonl`.
+- **Figures not written.** `SAVE_FIGURES=0`; set it to `1` (or tick "Save 3D
+  figures" in the app). Plotly must be installed.
+- **Depth looks inverted in a figure.** Set the batch `axis_order` (for example
+  `2,1,0`) and check again.
+
+---
 
 ## Notes for downstream analysis (GWAS)
 
@@ -285,14 +503,19 @@ pipeline itself, independently of any upstream segmentation.
 - Treat `%removed`, `MaxO` and collar-related quantities as covariates / quality
   indicators rather than biological traits. Including the batch and `%removed` as
   covariates removes most of the scan-quality confound.
+- Keep `params_used.json` with your trait tables so the exact processing settings
+  are traceable per batch.
+
+---
 
 ## Repository structure
 
 ```
 .
-├── run_pipeline.py             Orchestration: I/O, collar, hypocotyl, traits, Excel
-├── generer_rapport_figures.py  Builds an HTML index to review figures (QC)
-├── rootctrait/                Pipeline package (pip-installable, `import rootctrait`)
+├── rootctrait_app.py           Desktop app (RootCTraitV3): import, parameters, run, tools
+├── pipeline_api.py             Callable API layer used by the app (and any script)
+├── run_pipeline.py             Engine: I/O, collar, hypocotyl, traits, Excel, batch loop
+├── rootctrait/                 Pipeline package (pip-installable, `import rootctrait`)
 │   ├── __init__.py
 │   ├── io_volume.py                Multi-format loading of 3D volumes
 │   ├── graph_extraction.py         Skeleton graph, branch points, pruning
@@ -300,21 +523,29 @@ pipeline itself, independently of any upstream segmentation.
 │   ├── decontamination.py          Parallel sheets + orphan fragments
 │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
 │   └── root_traits_full.py         Full trait set
+├── tools/                      Post-processing utilities (also in the app's Tools tab)
+│   ├── __init__.py
+│   ├── merge_batches.py            Merge all batch tables into one file
+│   ├── extract_checkpoint.py       Rebuild tables from checkpoints
+│   └── generer_rapport_figures.py  HTML index to review 3D figures (QC)
 ├── docs/traits.md              Trait reference
 ├── docs/limitations.md         Known limitations
-├── params_example.txt          Config for the bundled example
+├── params.txt                  All settings + batch definitions
+├── example/params_example.txt  Ready-to-run config for the bundled example
 ├── example/roots/sample_S1.npy Synthetic example dataset (versioned)
 ├── tests/test_invariants.py    Invariant tests (pytest)
 ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
-├── params.txt                  All settings
 ├── pyproject.toml              Package metadata (pip install -e .)
 ├── requirements.txt
 ├── makeDir.sh                  Creates data/ and results/ folders
 ├── data/                       Input volumes (not versioned)
-└── results/                    Output (Excel, figures, checkpoint)
+└── results/                    Output: Excel, figures, checkpoint, params_used.json, failures.jsonl
 ```
 
-Run `run_pipeline.py` from the root folder (or `pip install -e .` first) so that `rootctrait` is importable.
+Run `run_pipeline.py` or `rootctrait_app.py` from the root folder (or
+`pip install -e .` first) so that `rootctrait` and `tools` are importable.
+
+---
 
 ## Known limitations
 
@@ -324,6 +555,8 @@ thresholds are calibrated on soybean CT at ~0.39 x 0.39 x 0.2 mm, and there is n
 ground truth for 3D roots (validation is by consistency, reproducibility and
 visual inspection, not absolute accuracy). See [`docs/limitations.md`](docs/limitations.md)
 for the full discussion.
+
+---
 
 ## Credits and acknowledgments
 
@@ -344,15 +577,9 @@ If you use RootCTrait, please cite the accompanying article (in preparation) and
 the software itself. A machine-readable citation is in [`CITATION.cff`](CITATION.cff).
 
 To make the software formally citable with a permanent DOI, create a tagged
-release and archive it on Zenodo:
-
-1. Sign in to Zenodo with your GitHub account and enable archiving for this
-   repository (Zenodo settings, GitHub tab).
-2. On GitHub, create a release (e.g. tag `v1.0.0`). Zenodo archives it and mints
-   a DOI automatically.
-3. Add the DOI to `CITATION.cff` (see the commented `identifiers` block) and to
-   this README, then cite it in your GWAS papers as, for example:
-   "Root traits were extracted with RootCTrait v1.0 (DOI:10.5281/zenodo.22212849)."
+release and archive it on Zenodo, then add the DOI to `CITATION.cff` and cite it
+in your GWAS papers, for example: "Root traits were extracted with RootCTrait
+v1.0 (DOI:...)."
 
 ## License
 

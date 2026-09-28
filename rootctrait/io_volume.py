@@ -28,7 +28,7 @@ import h5py
 from scipy.io import loadmat
 
 
-def _load_mat(path, transpose_v73=True):
+def _load_mat(path, transpose_v73=True, var_name=None):
     """Load a .mat file.
 
     v7.3 (HDF5): h5py returns the axes reversed (MATLAB is column-major, h5py
@@ -43,7 +43,10 @@ def _load_mat(path, transpose_v73=True):
                     if not k.startswith('#') and getattr(f[k], 'ndim', 0) == 3]
             if not cand:
                 raise KeyError("No 3D variable in %s" % path)
-            key = max(cand, key=lambda kv: int(np.prod(kv[1])))[0]
+            if var_name is not None and var_name in dict(cand):
+                key = var_name                       # load the requested variable
+            else:
+                key = max(cand, key=lambda kv: int(np.prod(kv[1])))[0]
             arr = np.array(f[key])
             return arr.T if transpose_v73 else arr
     except OSError:
@@ -52,6 +55,8 @@ def _load_mat(path, transpose_v73=True):
                 if not k.startswith('__') and np.asarray(v).ndim == 3]
         if not cand:
             raise KeyError("No 3D variable in %s" % path)
+        if var_name is not None and var_name in dict(cand):
+            return dict(cand)[var_name]
         return max(cand, key=lambda kv: kv[1].size)[1]
 
 
@@ -63,7 +68,7 @@ def _load_npz(path):
         return np.asarray(d[keys[0]])
 
 
-def load_volume(path, axis_order=None, transpose_v73=True):
+def load_volume(path, axis_order=None, transpose_v73=True, var_name=None):
     """Load a 3D volume from .mat, .tif/.tiff, .npy/.npz or .nii/.nii.gz.
 
     Parameters
@@ -88,7 +93,7 @@ def load_volume(path, axis_order=None, transpose_v73=True):
     ext = '.nii.gz' if low.endswith('.nii.gz') else os.path.splitext(path)[1].lower()
 
     if ext == '.mat':
-        V = _load_mat(path, transpose_v73=transpose_v73)
+        V = _load_mat(path, transpose_v73=transpose_v73, var_name=var_name)
     elif ext in ('.tif', '.tiff'):
         import tifffile
         V = np.asarray(tifffile.imread(path))
