@@ -77,7 +77,60 @@ def _insertion_angle(seg, parent, vs, mm=4.0, win=6):
     return float(np.degrees(np.arccos(np.clip(cos, 0.0, 1.0))))
 
 
-def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full):
+HOOK_MM = 3.0   # upward return at the pivot tip above which the tip is cut (mm)
+
+
+def cut_pivot_hook(primary_path, voxel_size, hook_mm=HOOK_MM):
+    """Pivot tip correction. A primary root plunges, it does not go back up. If the
+    pivot returns upward after its deepest point by more than `hook_mm` (a
+    skeletonization artifact, or the pivot "jumping" onto a neighbouring upward
+    root), the path is cut at its deepest point; smaller natural undulations are
+    tolerated. Returns (kept_path, cut_path); cut_path is empty when no cut is made.
+    Used both for the traits and for the review figure, so both show the same pivot."""
+    vs = np.asarray(voxel_size, float)
+    P = np.asarray(primary_path, int)
+    if len(P) > 2:
+        deepest = int(np.argmax(P[:, 0]))
+        if deepest < len(P) - 1 and (P[deepest, 0] - P[-1, 0]) * vs[0] > hook_mm:
+            return P[:deepest + 1], P[deepest:]
+    return P, P[:0]
+
+
+def root_mask(BW, all_segments, root_segments, primary_path, voxel_size, chunk=500000):
+    """Binary mask restricted to the cleaned root system. Every foreground voxel of
+    BW is assigned to its nearest skeleton voxel (physical distance) among all the
+    segments of the decomposition; it is kept when that skeleton voxel belongs to the
+    cleaned roots (or to the primary path). Material attached to the hypocotyl, to
+    removed sheets or to orphan fragments is therefore excluded, so that volume and
+    surface describe the same root system as the skeleton traits."""
+    vs = np.asarray(voxel_size, float)
+    ref = [s['coords'] for s in all_segments]
+    flag = [np.zeros(len(s['coords']), bool) for s in all_segments]
+    keep_ids = set(id(s) for s in root_segments)
+    for k, s in enumerate(all_segments):
+        if id(s) in keep_ids:
+            flag[k][:] = True
+    ref.append(np.asarray(primary_path, int).reshape(-1, 3))
+    flag.append(np.ones(len(ref[-1]), bool))
+    ref = np.vstack(ref).astype(np.int64); flag = np.concatenate(flag)
+    # a voxel shared by a kept and a removed segment counts as kept
+    key = np.ravel_multi_index(ref.T, BW.shape)
+    uk, inv = np.unique(key, return_inverse=True)
+    uflag = np.zeros(len(uk), bool); np.logical_or.at(uflag, inv, flag)
+    uvox = np.column_stack(np.unravel_index(uk, BW.shape))
+    tree = cKDTree(uvox * vs)
+    fg = np.argwhere(BW)
+    out = np.zeros_like(BW, dtype=bool)
+    for i in range(0, len(fg), chunk):
+        F = fg[i:i + chunk]
+        _, j = tree.query(F * vs)
+        F = F[uflag[j]]
+        out[F[:, 0], F[:, 1], F[:, 2]] = True
+    return out
+
+
+def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full,
+                       hook_mm=HOOK_MM):
     vs = np.asarray(voxel_size, float)
     base = np.asarray(base_rcp, float)
     baseY = base[0] * vs[0]
@@ -85,19 +138,7 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T = {}
 
     # ---- primary ----
-    PPv = np.asarray(primary_path, int)
-    # "Hook" correction: a primary root plunges, it does not go back up. If the
-    # pivot tip goes back up (skeletonization artifact, or the pivot "jumping" onto
-    # a neighbouring upward root), cut the pivot at its deepest point. This avoids
-    # inflating LRP with a non-biological upward portion.
-    if len(PPv) > 2:
-        deepest = int(np.argmax(PPv[:, 0]))
-        if deepest < len(PPv) - 1:
-            # only cut if the rise is significant (>3mm), otherwise tolerate the
-            # small natural undulations of the pivot
-            rise_mm = (PPv[deepest, 0] - PPv[-1, 0]) * vs[0]
-            if rise_mm > 3.0:
-                PPv = PPv[:deepest + 1]
+    PPv, _ = cut_pivot_hook(primary_path, vs, hook_mm)
     PP = PPv.astype(float) * vs
     LRP = _len_phys(PP)
     T['LRP'] = LRP
@@ -185,7 +226,8 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     except Exception:
         T['CHV'] = np.nan
 
-    # ---- volume and surface from the mask ----
+    # ---- volume and surface from the mask (pass the mask restricted to the
+    # cleaned roots, see root_mask, so that IC and SRL combine consistent quantities) ----
     vvol = float(np.prod(vs))
     VRT = float(BW.sum()) * vvol
     T['VRT'] = VRT

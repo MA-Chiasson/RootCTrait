@@ -34,7 +34,7 @@ from openpyxl.utils import get_column_letter
 from rootctrait.graph_extraction import prune_skeleton
 from rootctrait.root_decomposition import decompose_root_system
 from rootctrait.decontamination import decontaminate, keep_base_component
-from rootctrait.root_traits_full import compute_all_traits
+from rootctrait.root_traits_full import compute_all_traits, cut_pivot_hook, root_mask
 from rootctrait.detection_hypocotyle import collar_and_hypocotyl
 from rootctrait.io_volume import load_volume
 from rootctrait.legacy import upgrade_record
@@ -83,9 +83,6 @@ LEN_MAX = float(PARAMS.get('LEN_MAX', '15'))
 DROP_ORPHANS = PARAMS.get('DROP_ORPHANS', '1').lower() not in ('0', 'false', 'no')
 SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
 TIMEOUT = int(PARAMS.get('TIMEOUT', '1800'))
-# Max root-voxel count above which the (memory-heavy) orphan cleanup is skipped.
-# Exposed so the size-dependent behaviour is tunable and traceable, not a magic number.
-ORPHAN_MAX_VOX = int(PARAMS.get('ORPHAN_MAX_VOX', '90000'))
 # Number of samples processed concurrently. 1 = current serial behaviour (default).
 PARALLEL = int(PARAMS.get('PARALLEL', '1'))
 
@@ -111,7 +108,7 @@ COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm',
         ('TOR', 'ratio', 1)]
 
 
-def detect_base(sk, edt, voxel_size):
+def detect_base(sk, edt, voxel_size, layer=0.20):
     """Collar detection: THICKEST point in the upper layer of the skeleton (the
     shallowest 20% in depth). The true collar is the widest structure at the top of
     the system; anchoring there straightens and re-centers the pivot. This is more
@@ -121,14 +118,14 @@ def detect_base(sk, edt, voxel_size):
     sc = np.argwhere(sk)
     if len(sc) == 0:
         raise ValueError("Empty skeleton")
-    threshold = np.percentile(sc[:, 0], 20)
+    threshold = np.percentile(sc[:, 0], 100 * layer)
     top = sc[sc[:, 0] <= threshold]
     rad = edt[top[:, 0], top[:, 1], top[:, 2]]
     return top[np.argmax(rad)]
 
 
 def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hypocotyl=None,
-                orphans=None, base=None, base2=None):
+                orphans=None, base=None, base2=None, pivot_hook=None):
     try:
         import plotly.graph_objects as go
     except ImportError:
@@ -161,6 +158,11 @@ def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hyp
         P = np.asarray(primary_path) * vs
         fig.add_trace(go.Scatter3d(x=P[:, 1], y=P[:, 2], z=P[:, 0], mode='lines',
                                    line=dict(color='black', width=6), name='pivot'))
+    if pivot_hook is not None and len(pivot_hook):
+        H = np.asarray(pivot_hook) * vs
+        fig.add_trace(go.Scatter3d(x=H[:, 1], y=H[:, 2], z=H[:, 0], mode='lines',
+                                   line=dict(color='#8c564b', width=6, dash='dot'),
+                                   name='pivot tip hook (cut)'))
     if base is not None:
         b = np.asarray(base) * vs
         fig.add_trace(go.Scatter3d(x=[b[1]], y=[b[2]], z=[b[0]], mode='markers',
@@ -273,30 +275,25 @@ def process(name, ctx):
     base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, voxel_size)
     roots = [s for s in kept if s['seg_id'] not in hypo_ids]
     hypocotyl = [s for s in kept if s['seg_id'] in hypo_ids]
-    # Orphan cleanup: a single call to the existing function, after removing the
-    # hypocotyl, to drop detached fragments. Memory guard on very large systems
-    # (keep_base_component builds a tree of all voxels).
+    # Orphan cleanup: one connectivity pass after removing the hypocotyl drops the
+    # fragments it detached. Applied to every sample (memory grows linearly with the
+    # number of voxels, see segment_adjacency), so processing never depends on size.
     orphans = []
-    nvox_roots = sum(len(s['coords']) for s in roots)
-    orphan_max = ctx.get('orphan_max_vox', 90000)
-    if roots and nvox_roots <= orphan_max:
-        try:
-            roots, orphans = keep_base_component(roots, base)
-        except Exception:
-            orphans = []
-    elif roots and nvox_roots > orphan_max:
-        # Cleanup skipped to bound memory. Logged so that size-dependent processing
-        # (a potential confound for GWAS) stays visible and auditable.
-        print(f"  {name:6s} orphan cleanup SKIPPED (roots={nvox_roots} vox > {orphan_max})", flush=True)
+    if roots:
+        roots, orphans = keep_base_component(roots, base)
     # Pivot extended up to the raised collar, so that the pivot length (LRP) starts
     # at base2 (the true start of the primary root).
     prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
     if ctx['save_figures']:
-        make_figure(name, roots, removed_segs, prim2, ctx['fig_dir'], voxel_size,
-                    hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2)
+        prim_kept, prim_cut = cut_pivot_hook(prim2, voxel_size)
+        make_figure(name, roots, removed_segs, prim_kept, ctx['fig_dir'], voxel_size,
+                    hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2,
+                    pivot_hook=prim_cut)
+    # Volume and surface are measured on the mask restricted to the cleaned roots.
+    BW_roots = root_mask(BW, segs, roots, prim2, voxel_size)
     # base2 = reference collar for the traits (depths, LRP, angles).
-    T = compute_all_traits(roots, prim2, base2, BW, edt, voxel_size, skv_clean)
+    T = compute_all_traits(roots, prim2, base2, BW_roots, edt, voxel_size, skv_clean)
     return n_raw, n_ret, T
 
 
@@ -430,7 +427,6 @@ def _effective_params():
         'len_max': LEN_MAX,
         'drop_orphans': DROP_ORPHANS,
         'save_figures': SAVE_FIGURES,
-        'orphan_max_vox': ORPHAN_MAX_VOX,
     }
 
 

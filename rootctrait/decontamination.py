@@ -77,6 +77,41 @@ def segment_features(segments, skv_full, voxel_size, rpar=RPAR, rnb=RNB):
     return dict(bc=bc, lin=lin, length=length)
 
 
+# Half of the 26-neighbourhood: each touching voxel pair is visited once.
+_HALF_26 = np.array([d for d in np.ndindex(3, 3, 3)
+                     if (np.array(d) - 1).tolist() > [0, 0, 0]]) - 1
+
+
+def segment_adjacency(segments):
+    """Sparse segment graph for connectivity. Two segments touch when one of their
+    voxels is identical to, or 26-connected with, a voxel of the other (distance
+    <= sqrt(3) in voxel units). The graph has the same connected components as this
+    touching relation (a voxel shared by several segments links them to each other
+    rather than pairwise to every neighbour). Memory grows linearly with the number
+    of voxels (sorted voxel keys and binary search), so it is safe for very large
+    root systems."""
+    n = len(segments)
+    V = np.vstack([s['coords'] for s in segments]).astype(np.int64)
+    owner = np.concatenate([np.full(len(s['coords']), i, dtype=np.int64)
+                            for i, s in enumerate(segments)])
+    V = V - V.min(0) + 1                      # pad by one voxel on every side
+    dims = tuple(int(d) for d in V.max(0) + 2)
+    key = np.ravel_multi_index(V.T, dims)
+    order = np.argsort(key, kind='stable')
+    skey, sown = key[order], owner[order]
+    rows, cols = [], []
+    same = np.where(skey[1:] == skey[:-1])[0]     # one voxel shared by two segments
+    rows.append(sown[same]); cols.append(sown[same + 1])
+    for off in _HALF_26:
+        nk = np.ravel_multi_index((V + off).T, dims)
+        pos = np.minimum(np.searchsorted(skey, nk), len(skey) - 1)
+        hit = skey[pos] == nk
+        rows.append(owner[hit]); cols.append(sown[pos[hit]])
+    r = np.concatenate(rows); c = np.concatenate(cols); m = r != c
+    r, c = r[m], c[m]
+    return csr_matrix((np.ones(2 * len(r)), (np.r_[r, c], np.r_[c, r])), shape=(n, n))
+
+
 def keep_base_component(segments, base):
     """Keep only the segments connected to the collar (connected component of the base).
     Two segments are connected if their voxels touch (distance <= sqrt(3)).
@@ -84,16 +119,7 @@ def keep_base_component(segments, base):
     n = len(segments)
     if n <= 1:
         return list(segments), []
-    allvox = np.vstack([s['coords'] for s in segments])
-    owner = np.concatenate([[i] * len(s['coords']) for i, s in enumerate(segments)])
-    pairs = cKDTree(allvox).query_pairs(r=1.7321, output_type='ndarray')
-    if len(pairs):
-        oi = owner[pairs[:, 0]]; oj = owner[pairs[:, 1]]; m = oi != oj
-        A = csr_matrix((np.ones(int(m.sum()) * 2),
-                        (np.r_[oi[m], oj[m]], np.r_[oj[m], oi[m]])), shape=(n, n))
-    else:
-        A = csr_matrix((n, n))
-    _, lab = connected_components(A, directed=False)
+    _, lab = connected_components(segment_adjacency(segments), directed=False)
     # main component = the one containing the pivot (order 1).
     # Fallback to the component closest to the collar if no order 1 exists.
     order1 = [i for i, s in enumerate(segments) if s.get('order') == 1]

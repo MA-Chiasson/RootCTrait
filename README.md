@@ -73,13 +73,13 @@ For each sample:
    column above the collar plus the branches hanging high on it) is excluded,
    while basal roots at collar level are kept.
 7. **Orphan cleanup**: after the hypocotyl is removed, one connectivity pass drops
-   any detached fragment. This pass is memory-bounded: above `ORPHAN_MAX_VOX`
-   root voxels it is skipped and the skip is logged, so any size-dependent
-   difference stays visible and auditable.
+   any detached fragment. It is applied to every sample; its memory use grows
+   linearly with the size of the system.
 8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
    the reference point; the primary root is traced continuously from the raised
    collar following the real skeleton path, and an upward hook at its tip
-   (more than 3 mm) is cut before its length is measured.
+   (more than 3 mm) is cut before its length is measured. Root volume and surface
+   are measured on the part of the mask attached to the cleaned roots.
 
 A resume mechanism (`checkpoint_traits.jsonl`, per batch) lets you interrupt and
 restart without recomputing everything.
@@ -211,8 +211,8 @@ Fields marked `*` are required. The one you must set is the **output folder
 
 You can save the current settings as a named **parameter set** and reload it
 later (the output folder is deliberately not stored in a preset, since it changes
-from run to run). `ORPHAN_MAX_VOX` and `PARALLEL` have no dedicated field; the app
-inherits them from `params.txt` at startup, so set those there if you need them.
+from run to run). `PARALLEL` has no dedicated field; the app inherits it from
+`params.txt` at startup, so set it there if you need it.
 
 ### Tools tab
 
@@ -264,7 +264,6 @@ All settings live in `params.txt`. Keys are case-insensitive. Lines starting wit
 | `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
 | `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
 | `TIMEOUT`       | `1800`         | per-sample time limit (seconds)                            |
-| `ORPHAN_MAX_VOX`| `90000`        | skip the orphan cleanup above this many root voxels        |
 | `PARALLEL`      | `1`            | number of samples processed concurrently (1 = serial)      |
 
 The processing settings above the batch lines are **shared by every batch**, which
@@ -414,6 +413,19 @@ python -m tools.merge_batches --format both # merges all batch tables into one f
 python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
 ```
 
+### Example 7: sensitivity of the traits to the thresholds
+
+`tools/sensitivity.py` moves each threshold below and above its default (one at a
+time), reruns the pipeline on a random subset of samples, and reports for every
+trait the rank correlation with the default and the median relative change:
+
+```bash
+python -m tools.sensitivity --batch block1_t1 --batch block2_t2 --n 30 --workers 4
+```
+
+Output: `results/sensitivity/sensitivity_traits.csv` and
+`results/sensitivity/sensitivity_summary.csv`.
+
 ---
 
 ## Output files
@@ -427,7 +439,8 @@ For each batch, in `results/<batch>/`:
   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
   `NRL_moyen_5_15`), are still read and renamed by the tools.
 - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
-  collar), kept laterals (blue), removed pollution (red), hypocotyl (orange,
+  collar, as used for the traits), pivot tip hook cut by the tip correction (brown,
+  dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
   excluded), detached orphans (grey), original collar (green), raised collar
   (purple diamond).
 - **`checkpoint_traits.jsonl`**: resume state (delete to recompute).
@@ -489,10 +502,6 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 - **`empty mask` error for a sample.** The file has no voxel above the binarization
   threshold (empty or non-binary input). It is skipped and logged in
   `failures.jsonl`; the rest of the batch continues.
-- **`orphan cleanup SKIPPED` in the console.** The sample exceeded `ORPHAN_MAX_VOX`
-  root voxels, so the memory-heavy cleanup was skipped. If many samples show this,
-  raise `ORPHAN_MAX_VOX` (watch memory) or ask for the low-memory connected-
-  components variant.
 - **Timeouts.** Increase `TIMEOUT`, or lower `PARALLEL` if the machine is
   oversubscribed. Timed-out samples are retried on the next run and recorded in
   `failures.jsonl`.
@@ -508,11 +517,11 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 - Trait quality depends on segmentation quality. Traits that **aggregate over all
   segments** (total length, counts, branching order, density) get inflated by
   residual surface pollution; traits that measure a **specific geometry** (primary
-  root length, branching angles) are more robust. Volume traits computed on the raw
-  mask (root volume, convex hull, surface, compactness) are the most sensitive.
+  root length, branching angles) are more robust. Volume traits (root volume, convex
+  hull, surface, compactness) are the most sensitive.
 - The size and count traits are **highly redundant** (they mostly measure one
   "system size" axis). Prefer a small non-redundant set over the full list.
-- Treat `%removed`, `MaxO` and collar-related quantities as covariates / quality
+- Treat `%removed`, `MaxO` and collar-related quantities as covariates or quality
   indicators rather than biological traits. Including the batch and `%removed` as
   covariates removes most of the scan-quality confound.
 - Keep `params_used.json` with your trait tables so the exact processing settings
@@ -540,13 +549,15 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── __init__.py
 │   ├── merge_batches.py            Merge all batch tables into one file
 │   ├── extract_checkpoint.py       Rebuild tables from checkpoints
-│   └── figure_report.py            HTML index to review 3D figures (QC)
+│   ├── figure_report.py            HTML index to review 3D figures (QC)
+│   └── sensitivity.py              One-at-a-time sensitivity analysis of the thresholds
 ├── docs/traits.md              Trait reference
 ├── docs/limitations.md         Known limitations
 ├── params.txt                  All settings + batch definitions
 ├── example/params_example.txt  Ready-to-run config for the bundled example
 ├── example/roots/sample_S1.npy Synthetic example dataset (versioned)
 ├── tests/test_invariants.py    Invariant tests (pytest)
+├── tests/test_components.py    Unit tests: connectivity, pivot hook, root mask
 ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
 ├── validation/phantom_results.csv   Results of that check
 ├── pyproject.toml              Package metadata (pip install -e .)

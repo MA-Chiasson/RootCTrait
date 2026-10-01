@@ -10,8 +10,11 @@ volume itself. Segmentation errors propagate directly into the traits:
 
 - Surface "sheets" / dense pollution near the collar inflate any trait that
   aggregates over segments (total length, counts, branching order, density).
-- Volume traits computed on the raw mask (`CHV`, `VRT`, `SRT`, `IC`, `SRL`) are the
-  most sensitive, and are affected by water content in the pot at scan time.
+- Volume traits (`CHV`, `VRT`, `SRT`, `IC`, `SRL`) are the most sensitive, and are
+  affected by water content in the pot at scan time. `VRT` and `SRT` are measured
+  on the part of the mask attached to the cleaned roots, so they exclude the
+  hypocotyl and removed artifacts, but they still depend on how thick the
+  segmentation draws each root.
 
 The decontamination step removes a large part of this, but it cannot recover
 information that the segmentation lost or invented. Use `%removed` as a
@@ -30,12 +33,13 @@ Thresholds (decontamination, collar climb, hypocotyl angle) were tuned and
 validated on soybean CT scans at a voxel size of about 0.39 x 0.39 x 0.2 mm. For a
 different species, resolution, or imaging modality, revalidate visually. The voxel
 size, the pruning length, the minimum segment length, the three decontamination
-thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) and the orphan cleanup limit
-(`ORPHAN_MAX_VOX`) can be adjusted in `params.txt`. The collar and hypocotyl
+thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) can be adjusted in `params.txt`. The collar and hypocotyl
 thresholds (20% collar layer, 45 degree hypocotyl angle, 0.7 x collar radius for
 the climb, 3 mm margin for high branches, 3 mm pivot hook cut) are fixed in the
 code; changing them requires editing `run_pipeline.py`,
-`rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`. The multi-format loader is implemented
+`rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`.
+`tools/sensitivity.py` measures how much each of these thresholds changes the
+traits, and should be rerun on any new dataset. The multi-format loader is implemented
 for `.mat`, `.tif`, `.npy` and `.nii`, but has been tested most thoroughly on
 `.mat`.
 

@@ -28,10 +28,6 @@ SAVE_FIGURES=0
 ; Time limit per sample, in seconds
 TIMEOUT=1800
 
-; Orphan cleanup is skipped above this number of root skeleton voxels (memory).
-; Each skip is logged in the console so that it stays traceable.
-ORPHAN_MAX_VOX=90000
-
 ; Number of samples processed in parallel. 1 = serial processing (default).
 ; Validate on a single batch before increasing it (the per sample time limit is kept).
 PARALLEL=1

@@ -185,22 +185,26 @@ def add_high_branches(segments, column_ids, base, base2, voxel_size,
     return ids
 
 
-def collar_and_hypocotyl(sk, edt, kept, base, voxel_size):
+def collar_and_hypocotyl(sk, edt, kept, base, voxel_size,
+                         angle_max=45.0, frac=0.7, haut_min_mm=3.0):
     """High-level function. Returns (base2, hypo_ids, gain_mm, column_pts).
+    angle_max, frac and haut_min_mm default to the published values (45 degrees,
+    0.7 x collar radius, 3 mm); they are exposed for the sensitivity analysis.
 
     base2       : raised (bounded) collar, to use as the collar for the traits.
     hypo_ids    : seg_ids of the hypocotyl segments to exclude (column + high branches).
     gain_mm     : how far the collar was raised.
     column_pts  : voxels of the thick column (for pivot extension / figure).
     """
-    col_ids, _, _ = vertical_column(kept, base, voxel_size)
+    col_ids, _, _ = vertical_column(kept, base, voxel_size, angle_max=angle_max)
     # The collar always climbs along the thick column (it goes up to the top of the
     # fleshy base). If a hypocotyl is present, it stops at its entrance; otherwise it
     # climbs to the end of the thick column.
     hypo_vox = set(tuple(v) for s in kept if s['seg_id'] in col_ids for v in s['coords'])
-    base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size)
+    base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size, frac=frac)
     if col_ids:
-        hypo_ids = add_high_branches(kept, col_ids, base, base2, voxel_size)
+        hypo_ids = add_high_branches(kept, col_ids, base, base2, voxel_size,
+                                     haut_min_mm=haut_min_mm)
     else:
         hypo_ids = set()
     return base2, hypo_ids, gain, column_pts

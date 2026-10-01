@@ -32,7 +32,6 @@ def default_params():
         "PATTERN": "{name}.mat",
         "DATA_ROOT": rp.DATA_ROOT,
         "RESULTS_ROOT": rp.RESULTS_ROOT,
-        "ORPHAN_MAX_VOX": rp.ORPHAN_MAX_VOX,
         "PARALLEL": rp.PARALLEL,
     }
 
@@ -66,7 +65,6 @@ def _apply(params):
     rp.DROP_ORPHANS = bool(params.get("DROP_ORPHANS", True))
     rp.SAVE_FIGURES = bool(params.get("SAVE_FIGURES", True))
     rp.TIMEOUT = int(params.get("TIMEOUT", 1800))
-    rp.ORPHAN_MAX_VOX = int(params.get("ORPHAN_MAX_VOX", 90000))
     rp.PARALLEL = max(1, int(params.get("PARALLEL", 1)))
     rp.DATA_ROOT = params.get("DATA_ROOT", "data") or "data"
     rp.RESULTS_ROOT = params.get("RESULTS_ROOT", "results")

@@ -79,15 +79,18 @@ redundant with `ANGO2` and are no longer computed.
 
 ## Volume and surface
 
-`VRT` and `SRT` are computed on the complete binarized mask, so they include the
-hypocotyl and any structure removed at the skeleton level. They are the most
-sensitive traits to segmentation noise and to water content in the pot.
+`VRT` and `SRT` are computed on the part of the binarized mask attached to the
+cleaned roots: each mask voxel is assigned to its nearest skeleton voxel, and kept
+when that voxel belongs to the cleaned root system. The hypocotyl, removed sheets
+and orphan fragments are therefore excluded, consistently with the skeleton traits.
+They remain the most sensitive traits to segmentation and to water content in the
+pot.
 
 | Trait | Definition                                                         | Unit   |
 |-------|--------------------------------------------------------------------|--------|
 | `CHV` | convex hull volume of the cleaned skeleton point cloud             | cm3    |
-| `VRT` | root volume: voxel count of the mask times the voxel volume        | cm3    |
-| `SRT` | root surface area: area of the marching cubes mesh of the mask     | cm2    |
+| `VRT` | root volume: voxel count of the cleaned root mask times the voxel volume | cm3 |
+| `SRT` | root surface area: area of the marching cubes mesh of the cleaned root mask | cm2 |
 | `IC`  | compactness, `VRT` / `CHV` (set to missing when above 1)           | ---    |
 | `SRL` | length per root volume, `TRL` / `VRT`                              | cm/cm3 |
 
