@@ -8,7 +8,7 @@ has been written so far and produces a trait table of the samples already done.
 
 Each checkpoint line holds: name, n_raw, n_removed, and T (the 38 traits). The output
 mirrors the normal table: ID, n_raw, n_removed, %removed, then the traits.
-Checkpoints written by versions before 2.0.0 (French key names) are read too.
+Checkpoints written by versions before 2.1.0 (French key names) are read too.
 
 Run:  python extract_checkpoint.py                     (scan results/<batch>/)
       python extract_checkpoint.py path/to/checkpoint_traits.jsonl

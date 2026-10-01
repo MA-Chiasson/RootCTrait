@@ -56,7 +56,7 @@ def read_batch_table(path):
         return None
     df = df[df["ID"].notna()].copy()                # drop the units row (ID is blank)
     df = df.dropna(how="all")
-    return upgrade_columns(df)                      # tables from versions < 2.0.0
+    return upgrade_columns(df)                      # tables from versions < 2.1.0
 
 
 def main():

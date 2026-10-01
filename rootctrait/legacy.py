@@ -1,6 +1,6 @@
 """Former output column names, kept only to read files written by earlier versions.
 
-Versions before 2.0.0 wrote some table columns and checkpoint keys with French
+Versions before 2.1.0 wrote some table columns and checkpoint keys with French
 names. They are renamed to their English equivalents when an old checkpoint or
 trait table is read, so that partial runs can be resumed and old tables merged.
 """

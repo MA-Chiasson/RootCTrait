@@ -435,7 +435,7 @@ For each batch, in `results/<batch>/`:
 - **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
   diameters in mm, volumes in cm3, angles in degrees). Columns `n_raw`
   (segments before cleaning), `n_removed` and `%removed` report the
-  decontamination. Tables and checkpoints written by versions before 2.0.0, which
+  decontamination. Tables and checkpoints written by versions before 2.1.0, which
   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
   `NRL_moyen_5_15`), are still read and renamed by the tools.
 - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
@@ -544,7 +544,7 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── decontamination.py          Parallel sheets + orphan fragments
 │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
 │   ├── root_traits_full.py         Full trait set
-│   └── legacy.py                   Former column names (reads files from versions < 2.0.0)
+│   └── legacy.py                   Former column names (reads files from versions < 2.1.0)
 ├── tools/                      Post-processing utilities (also in the app's Tools tab)
 │   ├── __init__.py
 │   ├── merge_batches.py            Merge all batch tables into one file
