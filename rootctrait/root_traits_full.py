@@ -113,12 +113,10 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T['MLRL'] = float(seglen[lat].mean()) if lat.any() else 0.0
     T['NRL'] = int(lat.sum())
     # distribution of lateral lengths into classes (mm)
-    # Keys must match the pipeline output columns (NRL_court_<5, NRL_moyen_5_15,
-    # NRL_long_>15). They were previously English (short/medium), which left the
-    # court and moyen columns empty.
+    # Keys must match the pipeline output columns (COLS in run_pipeline.py).
     ll = seglen[lat]
-    T['NRL_court_<5'] = int((ll < 5).sum())
-    T['NRL_moyen_5_15'] = int(((ll >= 5) & (ll < 15)).sum())
+    T['NRL_short_<5'] = int((ll < 5).sum())
+    T['NRL_medium_5_15'] = int(((ll >= 5) & (ll < 15)).sum())
     T['NRL_long_>15'] = int((ll >= 15).sum())
 
     # ---- skeleton point cloud (depth, width, hull) ----

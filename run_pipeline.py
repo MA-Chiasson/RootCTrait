@@ -37,6 +37,7 @@ from rootctrait.decontamination import decontaminate, keep_base_component
 from rootctrait.root_traits_full import compute_all_traits
 from rootctrait.detection_hypocotyle import collar_and_hypocotyl
 from rootctrait.io_volume import load_volume
+from rootctrait.legacy import upgrade_record
 
 # ============================ CONFIGURATION ============================
 
@@ -64,6 +65,7 @@ def load_params(path):
                     batches.append({'name': bname, 'pattern': pattern, 'axis_order': axis_order})
                 elif '=' in line:
                     k, v = line.split('=', 1)
+                    v = re.split(r'\s;', v, maxsplit=1)[0]   # drop an inline ' ; comment'
                     p[k.strip().upper()] = v.strip()
     return p, batches
 
@@ -97,14 +99,14 @@ else:
 # ======================================================================
 
 COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm', .1),
-        ('NRL', 'compte', 1), ('NRL_court_<5', 'compte', 1), ('NRL_moyen_5_15', 'compte', 1),
-        ('NRL_long_>15', 'compte', 1), ('PM', 'cm', .1), ('D50', 'cm', .1), ('D95', 'cm', .1),
+        ('NRL', 'count', 1), ('NRL_short_<5', 'count', 1), ('NRL_medium_5_15', 'count', 1),
+        ('NRL_long_>15', 'count', 1), ('PM', 'cm', .1), ('D50', 'cm', .1), ('D95', 'cm', .1),
         ('WX', 'cm', .1), ('WZ', 'cm', .1), ('LM', 'cm', .1), ('W25', 'cm', .1), ('W50', 'cm', .1),
         ('W75', 'cm', .1), ('RLP', 'ratio', 1),
         ('ANGO2', 'deg', 1), ('ANGO2_sd', 'deg', 1), ('ANGI', 'deg', 1),
         ('CHV', 'cm3', .001), ('VRT', 'cm3', .001), ('SRT', 'cm2', .01), ('IC', 'ratio', 1),
-        ('SRL', 'cm/cm3', 100), ('NT', 'compte', 1), ('NBP', 'compte', 1), ('MaxO', 'compte', 1),
-        ('DR', 'nb/cm', 1), ('NTR', 'compte', 1), ('IBD', 'cm', .1), ('DRP', 'mm', 1),
+        ('SRL', 'cm/cm3', 100), ('NT', 'count', 1), ('NBP', 'count', 1), ('MaxO', 'count', 1),
+        ('DR', 'nb/cm', 1), ('NTR', 'count', 1), ('IBD', 'cm', .1), ('DRP', 'mm', 1),
         ('DRS', 'mm', 1), ('DMAX', 'mm', 1), ('DD_cv', 'ratio', 1), ('TAPER', 'frac/cm', 1),
         ('TOR', 'ratio', 1)]
 
@@ -119,10 +121,10 @@ def detect_base(sk, edt, voxel_size):
     sc = np.argwhere(sk)
     if len(sc) == 0:
         raise ValueError("Empty skeleton")
-    seuil = np.percentile(sc[:, 0], 20)
-    haut = sc[sc[:, 0] <= seuil]
-    rad = edt[haut[:, 0], haut[:, 1], haut[:, 2]]
-    return haut[np.argmax(rad)]
+    threshold = np.percentile(sc[:, 0], 20)
+    top = sc[sc[:, 0] <= threshold]
+    rad = edt[top[:, 0], top[:, 1], top[:, 2]]
+    return top[np.argmax(rad)]
 
 
 def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hypocotyl=None,
@@ -176,9 +178,8 @@ def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hyp
     return True
 
 
-# The current batch is passed to the workers via module variables
 # The current batch context (data_dir, pattern, axis_order, fig_dir) is passed
-# explicitement aux workers, pour compatibilite avec le mode 'spawn' de Windows.
+# explicitly to the workers, for compatibility with the 'spawn' start method (Windows).
 
 
 
@@ -260,7 +261,7 @@ def process(name, ctx):
     segs, prim, voxels, border, bnode = decompose_root_system(
         sk, base, list(voxel_size), dist_map=edt,
         min_seg_len_mm=ctx['min_seg_len_mm'], crown_exclude_mm=0.0)
-    n_brut = len(segs)
+    n_raw = len(segs)
     kept, removed_segs, feats = decontaminate(segs, voxels, voxel_size, base=base,
                                               bc_min=ctx['bc_min'], lin_max=ctx['lin_max'], len_max=ctx['len_max'],
                                               drop_orphans=ctx['drop_orphans'])
@@ -296,7 +297,7 @@ def process(name, ctx):
                     hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2)
     # base2 = reference collar for the traits (depths, LRP, angles).
     T = compute_all_traits(roots, prim2, base2, BW, edt, voxel_size, skv_clean)
-    return n_brut, n_ret, T
+    return n_raw, n_ret, T
 
 
 def write_excel(results, out_xlsx, title):
@@ -308,7 +309,7 @@ def write_excel(results, out_xlsx, title):
     ws.cell(1, 1).fill = PatternFill("solid", start_color="1F3864")
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 22
-    hdr = ["ID", "n_brut", "n_retire", "%retire"] + [c[0] for c in COLS]
+    hdr = ["ID", "n_raw", "n_removed", "%removed"] + [c[0] for c in COLS]
     uni = ["", "", "", ""] + [c[1] for c in COLS]
     for j, h in enumerate(hdr, 1):
         cc = ws.cell(2, j, h); cc.font = Font(name=F, bold=True, color="FFFFFF")
@@ -374,7 +375,7 @@ def load_store(path):
                 if not line:
                     continue
                 try:
-                    r = json.loads(line); recs[r['name']] = r
+                    r = upgrade_record(json.loads(line)); recs[r['name']] = r
                 except Exception:
                     pass
     return recs
@@ -403,7 +404,7 @@ def run_with_timeout(name, ctx, timeout):
     try:
         return q.get_nowait()
     except Exception:
-        return ('err', 'processus termine sans renvoyer de resultat')
+        return ('err', 'process ended without returning a result')
 
 
 def list_samples(data_dir, pattern):
@@ -448,7 +449,7 @@ def _handle_result(name, status, payload, t0, store, checkpoint, failures_path):
     dt = time.time() - t0
     if status == 'ok':
         nb, nr, T = payload
-        rec = {'name': name, 'n_brut': nb, 'n_ret': nr, 'T': _clean_T(T)}
+        rec = {'name': name, 'n_raw': nb, 'n_removed': nr, 'T': _clean_T(T)}
         store[name] = rec
         append_store(checkpoint, rec)
         lrp = T.get('LRP') if isinstance(T, dict) else None
@@ -584,13 +585,13 @@ def process_batch(batch, should_stop=None):
             _handle_result(name, status, payload, t0, store, checkpoint, failures_path)
     else:
         _run_parallel(todo, ctx, store, checkpoint, failures_path, nworkers, should_stop)
-    results = [(s, store[s]['n_brut'], store[s]['n_ret'], store[s]['T']) for s in samples if s in store]
+    results = [(s, store[s]['n_raw'], store[s]['n_removed'], store[s]['T']) for s in samples if s in store]
     title = f"Root traits - {bname} - after decontamination (cleaned skeleton)"
     write_excel(results, out_xlsx, title)
     ok = len(results); fail = len(samples) - ok
     print(f"  -> {out_xlsx}  ({ok}/{len(samples)} samples)")
     if fail:
-        print(f"  -> {fail} non aboutis (relancez pour les reprendre)")
+        print(f"  -> {fail} not completed (run again to resume them)")
     print()
 
 

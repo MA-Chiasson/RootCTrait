@@ -2,6 +2,11 @@
 data/
 results/
 
+# desktop app session (local folder paths) and generated review reports
+app_session.json
+figure_report.html
+rapport_figures.html
+
 # python
 __pycache__/
 *.pyc

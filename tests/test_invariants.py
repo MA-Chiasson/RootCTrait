@@ -71,12 +71,12 @@ def test_compactness_le_one():
 
 
 def test_nrl_equals_sum_of_classes():
-    s = T['NRL_court_<5'] + T['NRL_moyen_5_15'] + T['NRL_long_>15']
+    s = T['NRL_short_<5'] + T['NRL_medium_5_15'] + T['NRL_long_>15']
     assert s == T['NRL']
 
 
 def test_angles_in_range():
-    for k in ('ANGO2', 'ANGO2_sd', 'ANGO2_init', 'ANGsys'):
+    for k in ('ANGO2', 'ANGO2_sd', 'ANGI'):
         v = T.get(k)
         if v is not None and not (isinstance(v, float) and np.isnan(v)):
             assert 0.0 <= v <= 90.0, f"{k}={v} out of [0,90]"

@@ -18,6 +18,7 @@ Output: <results>/merged_traits.xlsx and/or .csv
 import os
 import sys
 import glob
+import re
 import pandas as pd
 
 import os as _os, sys as _sys
@@ -25,6 +26,7 @@ import os as _os, sys as _sys
 PROJECT_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, PROJECT_ROOT)
+from rootctrait.legacy import upgrade_columns
 
 
 def results_root():
@@ -35,7 +37,7 @@ def results_root():
         for line in open(pfile, encoding="utf-8", errors="ignore"):
             line = line.strip()
             if line.upper().startswith("RESULTS_ROOT"):
-                root = line.split("=", 1)[1].strip()
+                root = re.split(r"\s;", line.split("=", 1)[1], maxsplit=1)[0].strip()
     if not os.path.isabs(root):
         root = os.path.join(PROJECT_ROOT, root)
     return root
@@ -54,7 +56,7 @@ def read_batch_table(path):
         return None
     df = df[df["ID"].notna()].copy()                # drop the units row (ID is blank)
     df = df.dropna(how="all")
-    return df
+    return upgrade_columns(df)                      # tables from versions < 2.0.0
 
 
 def main():
@@ -95,7 +97,7 @@ def main():
     # prudent union: concat aligns on the union of columns, missing -> NaN
     merged = pd.concat(frames, ignore_index=True, sort=False)
     # keep a stable, readable column order: batch, ID, then the rest as first seen
-    lead = [c for c in ["batch", "ID", "n_brut", "n_retire", "%retire"] if c in merged.columns]
+    lead = [c for c in ["batch", "ID", "n_raw", "n_removed", "%removed"] if c in merged.columns]
     rest = [c for c in merged.columns if c not in lead]
     merged = merged[lead + rest]
 

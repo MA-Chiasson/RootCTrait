@@ -1,5 +1,5 @@
-"""generer_rapport_figures.py
-Builds a single index report (rapport_figures.html) to review all the 3D figures
+"""figure_report.py
+Builds a single index report (figure_report.html) to review all the 3D figures
 of the pipeline without loading them all at once.
 
 Anti-crash principle: each Plotly figure is loaded (in an iframe) only when its
@@ -14,8 +14,8 @@ Review features:
   - "Export CSV" button to retrieve all the judgments at the end;
   - progress counter per batch.
 
-Placement: put this script at the ROOT (next to the results/ folder) and run it.
-It scans results/<batch>/figures/*.html and writes rapport_figures.html there.
+Run from the project root: python -m tools.figure_report
+It scans results/<batch>/figures/*.html and writes results/figure_report.html.
 """
 import os, glob, json, re
 
@@ -26,7 +26,7 @@ if PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, PROJECT_ROOT)
 
 RESULTS_ROOT = os.path.join(PROJECT_ROOT, "results")
-SORTIE = os.path.join(RESULTS_ROOT, "rapport_figures.html")
+OUTPUT_HTML = os.path.join(RESULTS_ROOT, "figure_report.html")
 
 # Preferred display order of batches (others follow alphabetically)
 PREFERRED_ORDER = []  # optional preferred display order of batches
@@ -223,28 +223,28 @@ def generate(results_root=None):
     """Assemble the figure review report. If results_root is given, scan that folder
     and write the report inside it; otherwise use the module defaults. Returns the
     output HTML path, or None if no figure was found. Callable from the GUI."""
-    global RESULTS_ROOT, SORTIE
+    global RESULTS_ROOT, OUTPUT_HTML
     if results_root is not None:
         RESULTS_ROOT = results_root
-        SORTIE = os.path.join(results_root, "rapport_figures.html")
+        OUTPUT_HTML = os.path.join(results_root, "figure_report.html")
     batches = scan_figures()
     if not batches:
         print(f"No figure found in {RESULTS_ROOT}/<batch>/figures/.")
         print("Check that the analysis ran with figures enabled (SAVE_FIGURES=1).")
         return None
     html = build(batches)
-    with open(SORTIE, "w", encoding="utf-8") as f:
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
         f.write(html)
     total = sum(len(v) for v in batches.values())
-    print(f"Report written: {SORTIE}  ({total} samples, {len(batches)} batches)")
+    print(f"Report written: {OUTPUT_HTML}  ({total} samples, {len(batches)} batches)")
     for b in order_batches(batches):
         print(f"  {b}: {len(batches[b])} figures")
-    return SORTIE
+    return OUTPUT_HTML
 
 
 def main():
     if generate() is not None:
-        print("\nOpen rapport_figures.html in a browser.")
+        print("\nOpen figure_report.html in a browser.")
         print("Figures load on click (nothing is preloaded, no crash).")
 
 

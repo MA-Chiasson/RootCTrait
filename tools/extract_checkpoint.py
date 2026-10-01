@@ -6,8 +6,9 @@ The pipeline appends one JSON line per processed sample to a checkpoint file
 (checkpoint_traits.jsonl) as it goes. If you stop a run, this tool reads whatever
 has been written so far and produces a trait table of the samples already done.
 
-Each checkpoint line holds: name, n_brut, n_ret, and T (the ~40 traits). The output
-mirrors the normal table: ID, n_brut, n_retire, %retire, then the traits.
+Each checkpoint line holds: name, n_raw, n_removed, and T (the 38 traits). The output
+mirrors the normal table: ID, n_raw, n_removed, %removed, then the traits.
+Checkpoints written by versions before 2.0.0 (French key names) are read too.
 
 Run:  python extract_checkpoint.py                     (scan results/<batch>/)
       python extract_checkpoint.py path/to/checkpoint_traits.jsonl
@@ -26,6 +27,7 @@ import os as _os, sys as _sys
 PROJECT_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, PROJECT_ROOT)
+from rootctrait.legacy import upgrade_record
 
 
 def load_factors():
@@ -53,7 +55,7 @@ def results_root():
         for line in open(pfile, encoding="utf-8", errors="ignore"):
             line = line.strip()
             if line.upper().startswith("RESULTS_ROOT"):
-                root = line.split("=", 1)[1].strip()
+                root = re.split(r"\s;", line.split("=", 1)[1], maxsplit=1)[0].strip()
     if not os.path.isabs(root):
         root = os.path.join(PROJECT_ROOT, root)
     return root
@@ -69,15 +71,15 @@ def read_checkpoint(path):
             if not line:
                 continue
             try:
-                d = json.loads(line)
+                d = upgrade_record(json.loads(line))
             except json.JSONDecodeError:
                 bad += 1
                 continue
-            nb = d.get("n_brut"); nr = d.get("n_ret")
+            nb = d.get("n_raw"); nr = d.get("n_removed")
             row = {"ID": d.get("name"),
-                   "n_brut": nb,
-                   "n_retire": nr,
-                   "%retire": (round(100 * nr / nb, 1) if nb else 0)}
+                   "n_raw": nb,
+                   "n_removed": nr,
+                   "%removed": (round(100 * nr / nb, 1) if nb else 0)}
             T = d.get("T", {})
             for k, v in T.items():
                 row[k] = (v * FACTORS[k]) if (k in FACTORS and isinstance(v, (int, float))) else v
@@ -87,7 +89,7 @@ def read_checkpoint(path):
     if not rows:
         return None
     df = pd.DataFrame(rows)
-    lead = [c for c in ["ID", "n_brut", "n_retire", "%retire"] if c in df.columns]
+    lead = [c for c in ["ID", "n_raw", "n_removed", "%removed"] if c in df.columns]
     ordered = [c for c in COL_ORDER if c in df.columns]              # same order as normal output
     rest = [c for c in df.columns if c not in lead + ordered]
     return df[lead + ordered + rest]

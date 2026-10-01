@@ -9,7 +9,6 @@ authors:
   - family-names: "Chiasson"
     given-names: "Marc-Antoine"
     affiliation: "Universite Laval"
-    # orcid: "https://orcid.org/0000-0000-0000-0000"   # optionnel: ajoute ton ORCID ici
 repository-code: "https://github.com/MA-Chiasson/RootCTrait"
 license: MIT
 abstract: >-

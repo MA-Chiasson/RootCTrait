@@ -1,8 +1,8 @@
 """rootctrait_app.py — RootCTrait desktop app.
 
-Version Ultra-Premium : Design épuré, sauvegarde de session (incluant le dossier parent), 
-tableau Treeview interactif barres zébrées avec défilement, barre de progression verte avec pourcentage, 
-calcul de l'ETA, sauvegarde de terminal et sécurité anti-plantage du journal.
+Features: session saving (including the parent folder), interactive Treeview table with
+striped rows and scrolling, green progress bar with percentage, ETA estimate, console
+log saving, and a log size guard that prevents the interface from freezing.
 """
 import os
 import json
@@ -51,8 +51,8 @@ if _DND:
 
 
 class Tooltip:
-    """Petite fenêtre d'information qui apparaît au survol d'un widget et
-    disparaît dès que le curseur le quitte."""
+    """Small information window shown when hovering over a widget,
+    hidden as soon as the cursor leaves it."""
 
     def __init__(self, widget, text, delay=450, wraplength=280):
         self.widget = widget
@@ -117,7 +117,7 @@ class ImportWindow(tk.Toplevel):
         self.folders = list(current)
         self.parent_folder = initial_parent
 
-        # Force la fenêtre d'importation au premier plan
+        # Bring the import window to the front
         self.attributes("-topmost", True)
         self.grab_set()
 
@@ -125,7 +125,7 @@ class ImportWindow(tk.Toplevel):
                 "(like 'data'), then click on rows to check/uncheck the batch folders you want.")
         ttk.Label(self, text=note, wraplength=610, style="Info.TLabel").pack(fill="x", padx=20, pady=(20, 10))
 
-        # --- Zone supérieure : Sélection du dossier Parent ---
+        # --- Top area: parent folder selection ---
         top_frame = ttk.Frame(self, padding=(20, 5))
         top_frame.pack(fill="x")
         ttk.Button(top_frame, text="📁 Browse Parent Folder...", command=self._browse_parent, style="Accent.TButton").pack(side="left")
@@ -134,7 +134,7 @@ class ImportWindow(tk.Toplevel):
         self.parent_lbl = ttk.Label(top_frame, text=display_name, font=("Segoe UI", 9, "italic"), foreground="#718096")
         self.parent_lbl.pack(side="left", padx=15)
 
-        # --- Zone centrale : Tableau Treeview avec de vraies coches graphiques ---
+        # --- Central area: Treeview table with graphical check marks ---
         mid = ttk.Frame(self, padding=20)
         mid.pack(fill="both", expand=True)
         
@@ -151,17 +151,17 @@ class ImportWindow(tk.Toplevel):
         sb.pack(side="left", fill="y")
         self.tree.configure(yscrollcommand=sb.set)
 
-        # Configuration de la couleur bleue pour les dossiers cochés
+        # Blue colour for checked folders
         self.tree.tag_configure("checked", background="#3182ce", foreground="white")
 
-        # Liaison du clic pour cocher/décocher
+        # Click binding to check/uncheck
         self.tree.bind("<ButtonRelease-1>", self._on_tree_click)
 
         if _DND:
             self.tree.drop_target_register(DND_FILES)
             self.tree.dnd_bind("<<Drop>>", self._on_drop)
 
-        # --- Zone basse : Boutons d'action ---
+        # --- Bottom area: action buttons ---
         btns = ttk.Frame(self, padding=20)
         btns.pack(fill="x")
         
@@ -176,7 +176,7 @@ class ImportWindow(tk.Toplevel):
         self.hint_lbl = ttk.Label(self, text=f"{len(self.folders)} folder(s) selected{hint}", style="Hint.TLabel")
         self.hint_lbl.pack(anchor="w", padx=20, pady=(0, 15))
         
-        # Si un dossier parent était mémorisé, on le charge automatiquement au démarrage
+        # If a parent folder was saved, load it automatically at startup
         if self.parent_folder and os.path.exists(self.parent_folder):
             self._load_subfolders(self.parent_folder)
         else:
@@ -194,7 +194,7 @@ class ImportWindow(tk.Toplevel):
         self._refresh()
 
     def _refresh(self):
-        """Met à jour l'affichage en conservant strictement l'ordre alphabétique initial stable."""
+        """Refresh the display while keeping the initial, stable alphabetical order."""
         current_items = {}
         for item in self.tree.get_children():
             values = self.tree.item(item, "values")
@@ -342,7 +342,7 @@ class ParamsWindow(tk.Toplevel):
         self.geometry("620x660")
         self.configure(bg="#f8f9fa")
         self.on_ok = on_ok
-        # Garde la fenêtre au-dessus de la fenêtre principale et retient le focus.
+        # Keep the window above the main window and hold the focus.
         self.transient(master)
         self.lift()
         self.grab_set()
@@ -422,7 +422,7 @@ class ParamsWindow(tk.Toplevel):
         if d:
             var.set(d)
             self._validate_fields()
-        # Ramène la fenêtre Parameters au premier plan après le dialogue.
+        # Bring the Parameters window back to the front after the dialog.
         self.lift()
         self.focus_force()
 
@@ -509,7 +509,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.style = ttk.Style()
         self.style.theme_use("clam")
 
-        # --- Polices nommées : elles seront redimensionnées avec la fenêtre ---
+        # --- Named fonts: resized together with the window ---
         self.f_base       = tkfont.Font(family="Segoe UI", size=10)
         self.f_button     = tkfont.Font(family="Segoe UI", size=9,  weight="bold")
         self.f_tab        = tkfont.Font(family="Segoe UI", size=10)
@@ -523,7 +523,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.f_console    = tkfont.Font(family="Consolas", size=10)
         self.f_console_b  = tkfont.Font(family="Consolas", size=10, weight="bold")
 
-        # (police, taille de base) pour le redimensionnement proportionnel
+        # (font, base size) for proportional resizing
         self._scalable_fonts = [
             (self.f_base, 10), (self.f_button, 9), (self.f_tab, 10), (self.f_tab_sel, 11),
             (self.f_status, 12), (self.f_hint, 9), (self.f_info, 10), (self.f_section, 10),
@@ -562,7 +562,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.style.configure("Treeview.Heading", font=self.f_tree_head, background="#e2e8f0", relief="flat")
         self.style.map("Treeview", background=[("selected", "#bee3f8")], foreground=[("selected", "#2b6cb0")])
 
-        # Conteneur supérieur prenant 100% de la largeur
+        # Top container spanning the full width
         header_frame = ttk.Frame(self, padding=(10, 10, 10, 0))
         header_frame.pack(fill="x")
         
@@ -573,7 +573,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         tab_an = ttk.Frame(nb, padding=15)
         nb.add(tab_an, text="Analysis")
         
-        # --- BLOC GAUCHE : Configuration & Préparation ---
+        # --- LEFT BLOCK: configuration and preparation ---
         left_frame = ttk.Frame(tab_an)
         left_frame.pack(side="left", fill="y")
         
@@ -585,8 +585,8 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         ttk.Button(left_frame, text="📂 Import Folders", command=self.open_import).pack(side="left")
         ttk.Button(left_frame, text="⚙️ Parameters", command=self.open_params).pack(side="left", padx=(8, 0))
         
-        # --- BLOC CENTRAL : Contrôle des Calculs (Forcé au milieu exact) ---
-        # Frame invisible extensible à gauche du centre
+        # --- CENTRAL BLOCK: run controls (forced to the exact centre) ---
+        # Invisible expandable frame left of the centre
         spacer_left = ttk.Frame(tab_an)
         spacer_left.pack(side="left", fill="x", expand=True)
         
@@ -599,7 +599,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.btn_stop = ttk.Button(center_frame, text="⏹ Stop", command=self.stop_analysis, state="disabled", style="Danger.TButton")
         self.btn_stop.pack(side="left", padx=4)
         
-        # Frame invisible extensible à droite du centre
+        # Invisible expandable frame right of the centre
         spacer_right = ttk.Frame(tab_an)
         spacer_right.pack(side="left", fill="x", expand=True)
         
@@ -628,7 +628,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
 
         btn_ckpt = ttk.Button(tab_tools, text="🔍 Extract checkpoints", command=self.tool_checkpoint)
         btn_ckpt.pack(side="left", padx=4)
-        Tooltip(btn_ckpt, "Extracts traits from the checkpoints (.h5) without rerunning the analysis, "
+        Tooltip(btn_ckpt, "Extracts traits from the checkpoints (checkpoint_traits.jsonl) without rerunning the analysis, "
                           "using the format selected above (both, xlsx or csv).")
 
         ttk.Separator(tab_tools, orient="vertical").pack(side="left", fill="y", padx=12, pady=2)
@@ -640,11 +640,11 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
 
         btn_del = ttk.Button(tab_tools, text="🗑 Delete checkpoints", command=self.tool_delete_checkpoints)
         btn_del.pack(side="left", padx=4)
-        Tooltip(btn_del, "Deletes the checkpoints (.h5) of a results folder to start over: the "
+        Tooltip(btn_del, "Deletes the checkpoints (checkpoint_traits.jsonl) of a results folder to start over: the "
                          "progress is reset to 0 and the analysis restarts from the beginning.")
 
 
-        # Zone du Tableau d'importation avec barres zébrées alternées et défilement
+        # Import table area with alternating striped rows and scrolling
         table_frame = ttk.Frame(self, padding=(10, 5, 10, 0))
         table_frame.pack(fill="both", expand=True)
         ttk.Label(table_frame, text="Current Import Queue & Status", font=self.f_section, foreground="#4a5568").pack(anchor="w", pady=(0, 3))
@@ -661,7 +661,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.queue_tree.column("Status", width=150, anchor="center")
         self.queue_tree.pack(side="left", fill="both", expand=True)
         
-        # Configuration des couleurs zébrées alternées
+        # Alternating stripe colours
         self.queue_tree.tag_configure("even", background="#ffffff")
         self.queue_tree.tag_configure("odd", background="#f7f9fa")
         
@@ -669,24 +669,24 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         queue_sb.pack(side="right", fill="y")
         self.queue_tree.configure(yscrollcommand=queue_sb.set)
 
-        # --- CORRECTIF : Réinjection de la barre de progression verte essentielle au calcul (Outil 3) ---
+        # --- FIX: restore the green progress bar used during the run (tool 3) ---
         progress_frame = ttk.Frame(self, padding=(10, 10, 10, 0))
         progress_frame.pack(fill="x")
         self.progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
         self.progress_bar.pack(fill="x")
 
-        # Zone Console Basse (Mise en page sécurisée)
+        # Bottom console area (safe layout)
         term_frame = ttk.Frame(self, padding=10)
         term_frame.pack(fill="both", expand=True)
         
-        # 1. Le titre de la console reste seul en haut
+        # 1. The console title stays alone at the top
         ttk.Label(term_frame, text="Live Console Output", font=self.f_section, foreground="#4a5568").pack(anchor="w", pady=(0, 5))
 
-        # 2. La barre d'action du bas est placée en DEUXIÈME avec side="bottom"
+        # 2. The bottom action bar is packed SECOND with side="bottom"
         bottom_action_bar = ttk.Frame(term_frame, padding=(0, 6, 0, 0))
         bottom_action_bar.pack(side="bottom", fill="x")
         
-        # Bouton épuré sans les points, collé de manière fluide au bord droit (padx=2)
+        # Plain button without the dots, aligned to the right edge (padx=2)
         ttk.Button(bottom_action_bar, text="💾 Save Console Log", command=self.save_console_log).pack(side="right", padx=(0, 2))
 
         # 3. La console noire prend TOUT l'espace central restant
@@ -704,10 +704,10 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self.bind("<Configure>", self._on_resize)
 
     def _on_resize(self, event):
-        """Redimensionne les polices proportionnellement à la taille de la fenêtre."""
+        """Resize the fonts in proportion to the window size."""
         if event.widget is not self:
             return
-        # Facteur basé sur la géométrie de référence 960x780, borné pour rester lisible.
+        # Factor based on the 960x780 reference geometry, bounded to stay readable.
         scale = min(event.width / 960.0, event.height / 780.0)
         scale = max(0.85, min(scale, 1.35))
         if self._last_scale is not None and abs(scale - self._last_scale) < 0.02:
@@ -764,7 +764,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
             else:
                 status_text = "📋 Ready"
             
-            # Injection alternée des tags pour obtenir le zébrage gris/blanc
+            # Alternate tags to obtain the grey/white striping
             row_tag = "even" if idx % 2 == 0 else "odd"
             self.queue_tree.insert("", "end", values=(bname, f, status_text), tags=(row_tag,))
 
@@ -787,8 +787,8 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
     def log(self, line):
         self.term.configure(state="normal")
         
-        # --- Sécurité anti-plantage / saturation de mémoire ---
-        # Si le journal dépasse 2000 lignes, on purge le haut pour libérer Tkinter et éviter le gel
+        # --- Guard against freezing / memory saturation ---
+        # Above 2000 log lines, purge the oldest lines to relieve Tkinter and avoid freezing
         if float(self.term.index("end-1c")) > 2000.0:
             self.term.delete("1.0", "100.0")
             self.term.insert("1.0", "... [Logs cleared down for memory optimization] ...\n", "heading")
@@ -826,8 +826,8 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         self._refresh_ready_status()
 
     def _refresh_ready_status(self):
-        """Met à jour le message de statut après un import : rappelle de choisir
-        le dossier de sortie dans Parameters s'il n'est pas encore défini."""
+        """Update the status message after an import: remind the user to choose the
+        output folder in Parameters if it is not set yet."""
         n = len(self.folders)
         if not n:
             self.status.configure(text="Import folders to start")
@@ -1090,7 +1090,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
 
     def tool_report(self):
         # No folder to pick: the report is always built on the project's results folder.
-        from tools import generer_rapport_figures as grf
+        from tools import figure_report as grf
         self.log(f"=== Generate figure report ({grf.RESULTS_ROOT}) ===")
         def do(fmt):
             path = grf.generate()                    # uses the project's RESULTS_ROOT
@@ -1121,7 +1121,7 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
                 for c in df.columns: presence[c] = presence.get(c, 0) + 1
             if not frames: print("Nothing to merge."); return
             merged = pd.concat(frames, ignore_index=True, sort=False)
-            lead = [c for c in ["batch","ID","n_brut","n_retire","%retire"] if c in merged.columns]
+            lead = [c for c in ["batch","ID","n_raw","n_removed","%removed"] if c in merged.columns]
             merged = merged[lead + [c for c in merged.columns if c not in lead]]
             base = _os.path.join(d, "merged_traits")
             if fmt in ("xlsx","both"): merged.to_excel(base+".xlsx", index=False); print(f"  -> {base}.xlsx")

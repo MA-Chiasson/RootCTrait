@@ -28,8 +28,14 @@ limited effect on the traits; larger oblique hypocotyls are worth a visual check
 
 Thresholds (decontamination, collar climb, hypocotyl angle) were tuned and
 validated on soybean CT scans at a voxel size of about 0.39 x 0.39 x 0.2 mm. For a
-different species, resolution, or imaging modality, revalidate visually and adjust
-the parameters in `params.txt` if needed. The multi-format loader is implemented
+different species, resolution, or imaging modality, revalidate visually. The voxel
+size, the pruning length, the minimum segment length, the three decontamination
+thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) and the orphan cleanup limit
+(`ORPHAN_MAX_VOX`) can be adjusted in `params.txt`. The collar and hypocotyl
+thresholds (20% collar layer, 45 degree hypocotyl angle, 0.7 x collar radius for
+the climb, 3 mm margin for high branches, 3 mm pivot hook cut) are fixed in the
+code; changing them requires editing `run_pipeline.py`,
+`rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`. The multi-format loader is implemented
 for `.mat`, `.tif`, `.npy` and `.nii`, but has been tested most thoroughly on
 `.mat`.
 

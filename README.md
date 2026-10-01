@@ -6,8 +6,8 @@ volumes, for population-scale phenotyping and quantitative genetics (GWAS).**
 RootCTrait takes already segmented binary volumes of root systems (for example
 from X-ray CT of plants grown in pots), reconstructs each skeleton, decomposes it
 into ordered roots (primary root and laterals), detects the collar and removes the
-hypocotyl, decontaminates surface artifacts, and writes an Excel table with about
-40 architectural traits per sample. Processing settings are shared across all
+hypocotyl, decontaminates surface artifacts, and writes an Excel table with 38
+architectural traits per sample. Processing settings are shared across all
 batches so that traits are directly comparable across a whole population.
 
 The pipeline is **multi-batch**: one run processes one or several batches (groups
@@ -63,20 +63,23 @@ For each sample:
    and crop to the bounding box. An empty mask (no voxel above the threshold) is
    reported as an error and skipped, so one bad file never stops a batch.
 2. **Skeletonize** and prune short spurious branches.
-3. **Detect the collar** at the thickest point of the upper region, then **raise
-   it** along the thick base column, stopping at the hypocotyl.
+3. **Detect the collar** at the thickest skeleton point within the uppermost 20%
+   of the system in depth.
 4. **Decompose** the skeleton into ordered segments (order 1 = primary root,
    order 2 = laterals, etc.).
 5. **Decontaminate**: remove parallel sheets and floating fragments.
-6. **Identify and exclude the hypocotyl** (vertical stem column above the collar
-   plus the branches hanging high on it); basal roots at collar level are kept.
+6. **Raise the collar and exclude the hypocotyl**: the collar climbs along the
+   thick base column and stops at the hypocotyl; the hypocotyl (vertical stem
+   column above the collar plus the branches hanging high on it) is excluded,
+   while basal roots at collar level are kept.
 7. **Orphan cleanup**: after the hypocotyl is removed, one connectivity pass drops
    any detached fragment. This pass is memory-bounded: above `ORPHAN_MAX_VOX`
    root voxels it is skipped and the skip is logged, so any size-dependent
    difference stays visible and auditable.
 8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
    the reference point; the primary root is traced continuously from the raised
-   collar following the real skeleton path.
+   collar following the real skeleton path, and an upward hook at its tip
+   (more than 3 mm) is cut before its length is measured.
 
 A resume mechanism (`checkpoint_traits.jsonl`, per batch) lets you interrupt and
 restart without recomputing everything.
@@ -218,12 +221,12 @@ Utilities that act on an existing `results` folder. The **Table format** selecto
 short description.
 
 - **Merge batches**: merges the trait tables of all batches into one combined file.
-- **Extract checkpoints**: rebuilds trait tables straight from the `.h5`
-  checkpoints, without rerunning the analysis.
+- **Extract checkpoints**: rebuilds trait tables straight from the
+  `checkpoint_traits.jsonl` checkpoints, without rerunning the analysis.
 - **Figure report**: builds an HTML report of the interactive 3D Plotly figures,
   sorted by batch and in numerical order, for visual validation.
-- **Delete checkpoints**: deletes the `.h5` checkpoints of a results folder to
-  start over; progress is reset to 0 and the analysis restarts from the beginning.
+- **Delete checkpoints**: deletes the `checkpoint_traits.jsonl` checkpoints of a
+  results folder to start over; progress is reset to 0 and the analysis restarts from the beginning.
 
 ---
 
@@ -244,7 +247,8 @@ Nothing else is needed; the folders in `results/` are created automatically.
 
 ## Configuration reference
 
-All settings live in `params.txt`. Keys are case-insensitive.
+All settings live in `params.txt`. Keys are case-insensitive. Lines starting with
+`;` are comments, and ` ; text` after a setting is ignored.
 
 | Key             | Default        | Role                                                        |
 |-----------------|----------------|------------------------------------------------------------|
@@ -279,19 +283,24 @@ BATCH <name> | <file_pattern> | <axis_order optional>
 - `<axis_order>` is optional (for example `2,1,0`); leave it empty for no
   permutation.
 
-Example (equivalent lines, `BATCH` and `BLOC` are interchangeable):
+Example (`BATCH` and `BLOC` are interchangeable):
 
 ```
-BATCH batch1 | sample_{name}.mat |
-BLOC  B2T2   | B2T2{name}.mat    |
-BLOC  B3T3   | B3T3{name}.tif    | 2,1,0
+BATCH block1_t1 | block1_t1_{name}.mat |
+BATCH block2_t1 | block2_t1_{name}.mat |
+BATCH block3_t2 | block3_t2_{name}.tif | 2,1,0
 ```
+
+Here `block1_t1_{name}.mat` matches `block1_t1_S001.mat`, `block1_t1_S002.mat`,
+and so on, and the sample IDs are `S001`, `S002`, ...
 
 Choose which of the defined batches to run with `BATCHES`:
 
 ```
-BATCHES=ALL            ; every batch defined below
-BATCHES=B2T3,B5T3      ; only these two
+; every batch defined below
+BATCHES=ALL
+; only these two
+BATCHES=block1_t1,block3_t2
 ```
 
 ---
@@ -333,25 +342,25 @@ identical settings, so the traits stay comparable across batches:
 
 ```
 data/
-  B2T2/  B2T2S1.mat B2T2S2.mat ...
-  B3T2/  B3T2S1.mat B3T2S2.mat ...
-  B5T2/  B5T2S1.mat B5T2S2.mat ...
+  block1_t1/  block1_t1_S001.mat block1_t1_S002.mat ...
+  block2_t1/  block2_t1_S001.mat block2_t1_S002.mat ...
+  block3_t1/  block3_t1_S001.mat block3_t1_S002.mat ...
 ```
 
 ```
 BATCHES=ALL
-BLOC B2T2 | B2T2{name}.mat |
-BLOC B3T2 | B3T2{name}.mat |
-BLOC B5T2 | B5T2{name}.mat |
+BATCH block1_t1 | block1_t1_{name}.mat |
+BATCH block2_t1 | block2_t1_{name}.mat |
+BATCH block3_t1 | block3_t1_{name}.mat |
 ```
 
 ```bash
 python run_pipeline.py
 ```
 
-Output: `results/B2T2/`, `results/B3T2/`, `results/B5T2/`, each with its own trait
-table, figures, and a `params_used.json`. Set `BATCHES=B2T2,B5T2` to process only
-some of them.
+Output: `results/block1_t1/`, `results/block2_t1/`, `results/block3_t1/`, each with
+its own trait table, figures, and a `params_used.json`. Set
+`BATCHES=block1_t1,block3_t1` to process only some of them.
 
 ### Example 3: run several batches faster (parallel)
 
@@ -361,9 +370,9 @@ per-sample timeout still applies:
 ```
 PARALLEL=4
 BATCHES=ALL
-BLOC B2T3 | B2T3{name}.mat |
-BLOC B3T3 | B3T3{name}.mat |
-BLOC B5T3 | B5T3{name}.mat |
+BATCH block1_t2 | block1_t2_{name}.mat |
+BATCH block2_t2 | block2_t2_{name}.mat |
+BATCH block3_t2 | block3_t2_{name}.mat |
 ```
 
 ```bash
@@ -400,7 +409,7 @@ RESULTS_ROOT=/mnt/analysis/rootctrait_out
 The same utilities exposed in the app's Tools tab can run standalone:
 
 ```bash
-python -m tools.generer_rapport_figures     # writes results/rapport_figures.html
+python -m tools.figure_report               # writes results/figure_report.html
 python -m tools.merge_batches --format both # merges all batch tables into one file
 python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
 ```
@@ -412,8 +421,11 @@ python -m tools.extract_checkpoint          # rebuilds tables from the checkpoin
 For each batch, in `results/<batch>/`:
 
 - **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
-  diameters in mm, volumes in cm3, angles in degrees). Columns `n_brut`,
-  `n_retire` and `%retire` report the decontamination.
+  diameters in mm, volumes in cm3, angles in degrees). Columns `n_raw`
+  (segments before cleaning), `n_removed` and `%removed` report the
+  decontamination. Tables and checkpoints written by versions before 2.0.0, which
+  used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
+  `NRL_moyen_5_15`), are still read and renamed by the tools.
 - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
   collar), kept laterals (blue), removed pollution (red), hypocotyl (orange,
   excluded), detached orphans (grey), original collar (green), raised collar
@@ -522,12 +534,13 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── root_decomposition.py       Decomposition into ordered roots
 │   ├── decontamination.py          Parallel sheets + orphan fragments
 │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
-│   └── root_traits_full.py         Full trait set
+│   ├── root_traits_full.py         Full trait set
+│   └── legacy.py                   Former column names (reads files from versions < 2.0.0)
 ├── tools/                      Post-processing utilities (also in the app's Tools tab)
 │   ├── __init__.py
 │   ├── merge_batches.py            Merge all batch tables into one file
 │   ├── extract_checkpoint.py       Rebuild tables from checkpoints
-│   └── generer_rapport_figures.py  HTML index to review 3D figures (QC)
+│   └── figure_report.py            HTML index to review 3D figures (QC)
 ├── docs/traits.md              Trait reference
 ├── docs/limitations.md         Known limitations
 ├── params.txt                  All settings + batch definitions
@@ -535,9 +548,10 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 ├── example/roots/sample_S1.npy Synthetic example dataset (versioned)
 ├── tests/test_invariants.py    Invariant tests (pytest)
 ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
+├── validation/phantom_results.csv   Results of that check
 ├── pyproject.toml              Package metadata (pip install -e .)
 ├── requirements.txt
-├── makeDir.sh                  Creates data/ and results/ folders
+├── CITATION.cff                Citation metadata
 ├── data/                       Input volumes (not versioned)
 └── results/                    Output: Excel, figures, checkpoint, params_used.json, failures.jsonl
 ```
@@ -576,10 +590,11 @@ root systems).
 If you use RootCTrait, please cite the accompanying article (in preparation) and
 the software itself. A machine-readable citation is in [`CITATION.cff`](CITATION.cff).
 
-To make the software formally citable with a permanent DOI, create a tagged
-release and archive it on Zenodo, then add the DOI to `CITATION.cff` and cite it
-in your GWAS papers, for example: "Root traits were extracted with RootCTrait
-v1.0 (DOI:...)."
+Each release is archived on Zenodo with a permanent DOI: version 2.0.0 is
+[10.5281/zenodo.23019246](https://doi.org/10.5281/zenodo.23019246) and version
+1.0.0 is [10.5281/zenodo.22212849](https://doi.org/10.5281/zenodo.22212849). Cite the
+version you used, for example: "Root traits were extracted with RootCTrait v2.0.0
+(doi:10.5281/zenodo.23019246)."
 
 ## License
 

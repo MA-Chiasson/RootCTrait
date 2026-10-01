@@ -1,5 +1,5 @@
 ; ===================== ROOTCTRAIT MULTI-BATCH CONFIGURATION =====================
-; Lines starting with ';' are comments. Comments must be on their own line.
+; Lines starting with ';' are comments. After a setting, ' ; text' is also a comment.
 
 ; Batches to process: ALL (every batch defined below) or a comma separated list,
 ; e.g. BATCHES=block1_t1,block2_t1
