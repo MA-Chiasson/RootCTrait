@@ -77,22 +77,32 @@ def _insertion_angle(seg, parent, vs, mm=4.0, win=6):
     return float(np.degrees(np.arccos(np.clip(cos, 0.0, 1.0))))
 
 
-HOOK_MM = 3.0   # upward return at the pivot tip above which the tip is cut (mm)
+HOOK_MM = 3.0   # upward return at the pivot tip above which it is flagged in the review figure (mm)
 
 
-def cut_pivot_hook(primary_path, voxel_size, hook_mm=HOOK_MM):
-    """Pivot tip correction. A primary root plunges, it does not go back up. If the
-    pivot returns upward after its deepest point by more than `hook_mm` (a
-    skeletonization artifact, or the pivot "jumping" onto a neighbouring upward
-    root), the path is cut at its deepest point; smaller natural undulations are
-    tolerated. Returns (kept_path, cut_path); cut_path is empty when no cut is made.
-    Used both for the traits and for the review figure, so both show the same pivot."""
+def pivot_return_mm(primary_path, voxel_size):
+    """Upward return of the pivot after its deepest point, in mm (0 when the deepest
+    point is the tip). A primary root that reaches the pot bottom or wall can turn
+    back up, but the same shape also arises when the pivot follows a neighbouring
+    upward root through a contact. The return is therefore not corrected: the whole
+    path is kept for the traits, and the return is reported as a quality control
+    value so that such samples can be checked in the review figure."""
     vs = np.asarray(voxel_size, float)
     P = np.asarray(primary_path, int)
-    if len(P) > 2:
+    if len(P) < 2:
+        return 0.0
+    deepest = int(np.argmax(P[:, 0]))
+    return float((P[deepest, 0] - P[-1, 0]) * vs[0])
+
+
+def split_pivot_return(primary_path, voxel_size, flag_mm=HOOK_MM):
+    """Split the pivot at its deepest point when its upward return exceeds `flag_mm`,
+    for display only. Returns (descending_part, returning_part); returning_part is
+    empty when the return is below the threshold. The traits always use the whole path."""
+    P = np.asarray(primary_path, int)
+    if len(P) > 2 and pivot_return_mm(P, voxel_size) > flag_mm:
         deepest = int(np.argmax(P[:, 0]))
-        if deepest < len(P) - 1 and (P[deepest, 0] - P[-1, 0]) * vs[0] > hook_mm:
-            return P[:deepest + 1], P[deepest:]
+        return P[:deepest + 1], P[deepest:]
     return P, P[:0]
 
 
@@ -129,8 +139,7 @@ def root_mask(BW, all_segments, root_segments, primary_path, voxel_size, chunk=5
     return out
 
 
-def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full,
-                       hook_mm=HOOK_MM):
+def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full):
     vs = np.asarray(voxel_size, float)
     base = np.asarray(base_rcp, float)
     baseY = base[0] * vs[0]
@@ -138,10 +147,11 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T = {}
 
     # ---- primary ----
-    PPv, _ = cut_pivot_hook(primary_path, vs, hook_mm)
+    PPv = np.asarray(primary_path, int)
     PP = PPv.astype(float) * vs
     LRP = _len_phys(PP)
     T['LRP'] = LRP
+    T['PIVOT_RETURN'] = pivot_return_mm(PPv, vs)   # quality control, not a trait
 
     # ---- per segment ----
     orders = np.array([s['order'] for s in segments])

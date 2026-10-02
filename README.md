@@ -77,8 +77,10 @@ For each sample:
    linearly with the size of the system.
 8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
    the reference point; the primary root is traced continuously from the raised
-   collar following the real skeleton path, and an upward hook at its tip
-   (more than 3 mm) is cut before its length is measured. Root volume and surface
+   collar following the real skeleton path, and its whole length is measured. An
+   upward return at its tip is not corrected: its height is reported in the
+   `pivot_return` column and, above 3 mm, drawn in the review figure so that the
+   sample can be checked. Root volume and surface
    are measured on the part of the mask attached to the cleaned roots.
 
 A resume mechanism (`checkpoint_traits.jsonl`, per batch) lets you interrupt and
@@ -435,12 +437,14 @@ For each batch, in `results/<batch>/`:
 - **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
   diameters in mm, volumes in cm3, angles in degrees). Columns `n_raw`
   (segments before cleaning), `n_removed` and `%removed` report the
-  decontamination. Tables and checkpoints written by versions before 2.1.0, which
+  decontamination, and `pivot_return` (mm) the upward return of the pivot after
+  its deepest point (0 when the deepest point is the tip). Tables and checkpoints
+  written by versions before 2.1.0, which
   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
   `NRL_moyen_5_15`), are still read and renamed by the tools.
 - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
-  collar, as used for the traits), pivot tip hook cut by the tip correction (brown,
-  dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
+  collar, as used for the traits), upward return of the pivot tip above 3 mm, kept
+  in the traits but flagged for checking (brown, dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
   excluded), detached orphans (grey), original collar (green), raised collar
   (purple diamond).
 - **`checkpoint_traits.jsonl`**: resume state (delete to recompute).

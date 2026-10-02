@@ -14,7 +14,7 @@ summary reports:
 
 Thresholds read from params.txt (PRUNE_VOX, MIN_SEG_LEN_MM, BC_MIN, LIN_MAX,
 LEN_MAX) and thresholds fixed in the code (collar layer, hypocotyl angle, collar
-climb fraction, high branch margin, pivot hook cut) are all covered.
+climb fraction, high branch margin) are all covered.
 
 Run from the project root, for example:
     python -m tools.sensitivity --batch block1_t1 --n 30 --workers 4
@@ -54,7 +54,6 @@ CODE_PARAMS = {
     'hypocotyl_angle_deg': (45.0, 35.0, 55.0),
     'climb_fraction': (0.7, 0.6, 0.8),
     'high_branch_mm': (3.0, 2.0, 4.0),
-    'pivot_hook_mm': (rtf.HOOK_MM, 2.0, 4.0),
 }
 CTX_KEY = {'PRUNE_VOX': 'prune_vox', 'MIN_SEG_LEN_MM': 'min_seg_len_mm',
            'BC_MIN': 'bc_min', 'LIN_MAX': 'lin_max', 'LEN_MAX': 'len_max'}
@@ -91,8 +90,6 @@ def _run_one(task):
     rp.collar_and_hypocotyl = functools.partial(
         _ORIG['collar_and_hypocotyl'], angle_max=code['hypocotyl_angle_deg'],
         frac=code['climb_fraction'], haut_min_mm=code['high_branch_mm'])
-    rp.compute_all_traits = functools.partial(_ORIG['compute_all_traits'],
-                                              hook_mm=code['pivot_hook_mm'])
     try:
         n_raw, n_rem, T = rp.process(sample, ctx)
     except Exception as e:                                   # keep going, log the failure

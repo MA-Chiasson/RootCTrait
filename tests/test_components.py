@@ -8,7 +8,7 @@ sys.path.insert(0, ROOT)
 
 from scipy.sparse.csgraph import connected_components
 from rootctrait.decontamination import segment_adjacency, keep_base_component
-from rootctrait.root_traits_full import cut_pivot_hook, root_mask
+from rootctrait.root_traits_full import pivot_return_mm, split_pivot_return, root_mask
 
 VS = (0.39, 0.39, 0.2)
 
@@ -35,14 +35,16 @@ def test_shared_voxel_connects():
     assert n == 1
 
 
-def test_hook_cut_and_tolerance():
+def test_pivot_return_flag():
     down = [[d, 0, 0] for d in range(0, 40)]
     hook = down + [[39 - k, 1, 0] for k in range(1, 12)]   # 11 voxels up = 4.3 mm
-    kept, cut = cut_pivot_hook(hook, VS)
-    assert kept[-1][0] == 39 and len(cut) == 12
+    assert abs(pivot_return_mm(hook, VS) - 11 * VS[0]) < 1e-9
+    d, u = split_pivot_return(hook, VS)
+    assert d[-1][0] == 39 and len(u) == 12
     small = down + [[39 - k, 1, 0] for k in range(1, 5)]   # 4 voxels up = 1.6 mm
-    kept, cut = cut_pivot_hook(small, VS)
-    assert len(kept) == len(small) and len(cut) == 0
+    d, u = split_pivot_return(small, VS)
+    assert len(d) == len(small) and len(u) == 0
+    assert pivot_return_mm(down, VS) == 0.0
 
 
 def test_root_mask_excludes_removed_material():

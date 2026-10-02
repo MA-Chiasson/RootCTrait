@@ -35,7 +35,7 @@ different species, resolution, or imaging modality, revalidate visually. The vox
 size, the pruning length, the minimum segment length, the three decontamination
 thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) can be adjusted in `params.txt`. The collar and hypocotyl
 thresholds (20% collar layer, 45 degree hypocotyl angle, 0.7 x collar radius for
-the climb, 3 mm margin for high branches, 3 mm pivot hook cut) are fixed in the
+the climb, 3 mm margin for high branches) are fixed in the
 code; changing them requires editing `run_pipeline.py`,
 `rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`.
 `tools/sensitivity.py` measures how much each of these thresholds changes the

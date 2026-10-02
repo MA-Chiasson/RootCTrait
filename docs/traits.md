@@ -17,12 +17,13 @@ contributes one segment per order.
 | `n_raw`     | number of skeleton segments before cleaning                    |
 | `n_removed` | number of segments removed by decontamination                  |
 | `%removed`  | fraction removed (a scan-quality indicator; use as covariate)  |
+| `pivot_return` | upward return of the pivot after its deepest point, mm (quality control; check samples above 3 mm) |
 
 ## Length
 
 | Trait  | Definition                                                                  | Unit |
 |--------|-----------------------------------------------------------------------------|------|
-| `LRP`  | primary root (pivot) length, from the raised collar to the tip, after the tip hook correction | cm |
+| `LRP`  | primary root (pivot) length, along the whole pivot path from the raised collar to its tip | cm |
 | `TRL`  | total root length (sum of all segment lengths)                              | cm   |
 | `LTRL` | total lateral length (segments of order >= 2)                               | cm   |
 | `MLRL` | mean length of lateral segments (order >= 2)                                | cm   |

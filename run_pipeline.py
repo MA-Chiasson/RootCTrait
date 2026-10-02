@@ -34,7 +34,7 @@ from openpyxl.utils import get_column_letter
 from rootctrait.graph_extraction import prune_skeleton
 from rootctrait.root_decomposition import decompose_root_system
 from rootctrait.decontamination import decontaminate, keep_base_component
-from rootctrait.root_traits_full import compute_all_traits, cut_pivot_hook, root_mask
+from rootctrait.root_traits_full import compute_all_traits, split_pivot_return, root_mask
 from rootctrait.detection_hypocotyle import collar_and_hypocotyl
 from rootctrait.io_volume import load_volume
 from rootctrait.legacy import upgrade_record
@@ -162,7 +162,7 @@ def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hyp
         H = np.asarray(pivot_hook) * vs
         fig.add_trace(go.Scatter3d(x=H[:, 1], y=H[:, 2], z=H[:, 0], mode='lines',
                                    line=dict(color='#8c564b', width=6, dash='dot'),
-                                   name='pivot tip hook (cut)'))
+                                   name='pivot upward return > 3 mm (kept, check)'))
     if base is not None:
         b = np.asarray(base) * vs
         fig.add_trace(go.Scatter3d(x=[b[1]], y=[b[2]], z=[b[0]], mode='markers',
@@ -286,10 +286,10 @@ def process(name, ctx):
     prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
     if ctx['save_figures']:
-        prim_kept, prim_cut = cut_pivot_hook(prim2, voxel_size)
-        make_figure(name, roots, removed_segs, prim_kept, ctx['fig_dir'], voxel_size,
+        prim_down, prim_up = split_pivot_return(prim2, voxel_size)
+        make_figure(name, roots, removed_segs, prim_down, ctx['fig_dir'], voxel_size,
                     hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2,
-                    pivot_hook=prim_cut)
+                    pivot_hook=prim_up)
     # Volume and surface are measured on the mask restricted to the cleaned roots.
     BW_roots = root_mask(BW, segs, roots, prim2, voxel_size)
     # base2 = reference collar for the traits (depths, LRP, angles).
@@ -299,15 +299,15 @@ def process(name, ctx):
 
 def write_excel(results, out_xlsx, title):
     wb = Workbook(); ws = wb.active; ws.title = "Traits"; F = "Arial"
-    ncol = len(COLS) + 4
+    ncol = len(COLS) + 5
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
     ws.cell(1, 1, title)
     ws.cell(1, 1).font = Font(name=F, bold=True, size=12, color="FFFFFF")
     ws.cell(1, 1).fill = PatternFill("solid", start_color="1F3864")
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 22
-    hdr = ["ID", "n_raw", "n_removed", "%removed"] + [c[0] for c in COLS]
-    uni = ["", "", "", ""] + [c[1] for c in COLS]
+    hdr = ["ID", "n_raw", "n_removed", "%removed", "pivot_return"] + [c[0] for c in COLS]
+    uni = ["", "", "", "", "mm"] + [c[1] for c in COLS]
     for j, h in enumerate(hdr, 1):
         cc = ws.cell(2, j, h); cc.font = Font(name=F, bold=True, color="FFFFFF")
         cc.fill = PatternFill("solid", start_color="2E5496")
@@ -320,12 +320,14 @@ def write_excel(results, out_xlsx, title):
     r = 4
     for name, nb, nr, T in results:
         band = "F5F8FC" if r % 2 == 0 else "FFFFFF"
-        vals = [name, nb, nr, (round(100 * nr / nb, 1) if nb else None)]
+        pr = T.get('PIVOT_RETURN') if T is not None else None
+        vals = [name, nb, nr, (round(100 * nr / nb, 1) if nb else None),
+                (round(float(pr), 2) if isinstance(pr, (int, float)) else None)]
         for j, v in enumerate(vals, 1):
             cc = ws.cell(r, j, v); cc.border = bd; cc.fill = PatternFill("solid", start_color=band)
             if j == 1:
                 cc.font = Font(name=F, bold=True)
-        for j, (key, unit, fac) in enumerate(COLS, 5):
+        for j, (key, unit, fac) in enumerate(COLS, 6):
             tv = T.get(key) if T is not None else None
             cc = ws.cell(r, j); cc.border = bd; cc.fill = PatternFill("solid", start_color=band)
             if tv is None or (isinstance(tv, float) and not math.isfinite(tv)):
@@ -335,10 +337,10 @@ def write_excel(results, out_xlsx, title):
                 cc.value = round(v, 3 if abs(v) < 100 else 1)
                 cc.number_format = '0.000' if abs(v) < 100 else '0.0'
         r += 1
-    ws.freeze_panes = "E4"
-    for col, w in (('A', 8), ('B', 8), ('C', 9), ('D', 8)):
+    ws.freeze_panes = "F4"
+    for col, w in (('A', 8), ('B', 8), ('C', 9), ('D', 8), ('E', 9)):
         ws.column_dimensions[col].width = w
-    for j in range(5, ncol + 1):
+    for j in range(6, ncol + 1):
         ws.column_dimensions[get_column_letter(j)].width = 10
     wb.save(out_xlsx)
 

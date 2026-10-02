@@ -1,5 +1,5 @@
 """RootCTrait: 3D root system architecture trait extraction from segmented CT volumes."""
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 from .io_volume import load_volume
 from .graph_extraction import prune_skeleton

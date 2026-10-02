@@ -80,7 +80,9 @@ def read_checkpoint(path):
                    "n_raw": nb,
                    "n_removed": nr,
                    "%removed": (round(100 * nr / nb, 1) if nb else 0)}
-            T = d.get("T", {})
+            T = dict(d.get("T", {}))
+            pr = T.pop("PIVOT_RETURN", None)
+            row["pivot_return"] = round(pr, 2) if isinstance(pr, (int, float)) else None
             for k, v in T.items():
                 row[k] = (v * FACTORS[k]) if (k in FACTORS and isinstance(v, (int, float))) else v
             rows.append(row)
@@ -89,7 +91,7 @@ def read_checkpoint(path):
     if not rows:
         return None
     df = pd.DataFrame(rows)
-    lead = [c for c in ["ID", "n_raw", "n_removed", "%removed"] if c in df.columns]
+    lead = [c for c in ["ID", "n_raw", "n_removed", "%removed", "pivot_return"] if c in df.columns]
     ordered = [c for c in COL_ORDER if c in df.columns]              # same order as normal output
     rest = [c for c in df.columns if c not in lead + ordered]
     return df[lead + ordered + rest]
