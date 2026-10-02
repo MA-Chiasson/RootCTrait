@@ -1,0 +1,920 @@
+From a8f49da8fa44b6c451521d2f8426e3760f2febe0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:59:07 -0400
+Subject: [PATCH 2/3] Size-independent orphan cleanup, volume on cleaned roots,
+ hook in figures
+
+- Orphan cleanup: connectivity computed with sorted voxel keys instead of a
+  KD-tree over all voxel pairs (same connected components, linear memory);
+  the cleanup now runs on every sample and ORPHAN_MAX_VOX is removed
+- VRT and SRT are measured on the mask voxels attached to the cleaned roots
+  (nearest skeleton voxel), so hypocotyl, sheets and orphans are excluded
+  and IC and SRL combine consistent quantities
+- Pivot tip correction factored into cut_pivot_hook, used by the traits and
+  the review figure; the cut hook is drawn as a separate trace
+- Collar layer, hypocotyl angle, climb fraction, high branch margin and
+  hook cut exposed as keyword arguments (defaults unchanged)
+- tools/sensitivity.py: one-at-a-time sensitivity analysis of the thresholds
+- tests/test_components.py: connectivity, hook cut and root mask tests
+- Docs updated accordingly
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PmEM2KX1GoYpy4haNdkRoA
+---
+ README.md                          |  43 ++++---
+ docs/limitations.md                |  14 ++-
+ docs/traits.md                     |  13 +-
+ params.txt                         |   4 -
+ pipeline_api.py                    |   2 -
+ rootctrait/decontamination.py      |  46 ++++++--
+ rootctrait/detection_hypocotyle.py |  12 +-
+ rootctrait/root_traits_full.py     |  72 ++++++++---
+ run_pipeline.py                    |  46 ++++----
+ tests/test_components.py           |  55 +++++++++
+ tools/sensitivity.py               | 184 +++++++++++++++++++++++++++++
+ 11 files changed, 405 insertions(+), 86 deletions(-)
+ create mode 100644 tests/test_components.py
+ create mode 100644 tools/sensitivity.py
+
+diff --git a/README.md b/README.md
+index 8ee9c54..c180a51 100644
+--- a/README.md
++++ b/README.md
+@@ -73,13 +73,13 @@ For each sample:
+    column above the collar plus the branches hanging high on it) is excluded,
+    while basal roots at collar level are kept.
+ 7. **Orphan cleanup**: after the hypocotyl is removed, one connectivity pass drops
+-   any detached fragment. This pass is memory-bounded: above `ORPHAN_MAX_VOX`
+-   root voxels it is skipped and the skip is logged, so any size-dependent
+-   difference stays visible and auditable.
++   any detached fragment. It is applied to every sample; its memory use grows
++   linearly with the size of the system.
+ 8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
+    the reference point; the primary root is traced continuously from the raised
+    collar following the real skeleton path, and an upward hook at its tip
+-   (more than 3 mm) is cut before its length is measured.
++   (more than 3 mm) is cut before its length is measured. Root volume and surface
++   are measured on the part of the mask attached to the cleaned roots.
+ 
+ A resume mechanism (`checkpoint_traits.jsonl`, per batch) lets you interrupt and
+ restart without recomputing everything.
+@@ -211,8 +211,8 @@ Fields marked `*` are required. The one you must set is the **output folder
+ 
+ You can save the current settings as a named **parameter set** and reload it
+ later (the output folder is deliberately not stored in a preset, since it changes
+-from run to run). `ORPHAN_MAX_VOX` and `PARALLEL` have no dedicated field; the app
+-inherits them from `params.txt` at startup, so set those there if you need them.
++from run to run). `PARALLEL` has no dedicated field; the app inherits it from
++`params.txt` at startup, so set it there if you need it.
+ 
+ ### Tools tab
+ 
+@@ -264,7 +264,6 @@ All settings live in `params.txt`. Keys are case-insensitive. Lines starting wit
+ | `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
+ | `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
+ | `TIMEOUT`       | `1800`         | per-sample time limit (seconds)                            |
+-| `ORPHAN_MAX_VOX`| `90000`        | skip the orphan cleanup above this many root voxels        |
+ | `PARALLEL`      | `1`            | number of samples processed concurrently (1 = serial)      |
+ 
+ The processing settings above the batch lines are **shared by every batch**, which
+@@ -414,6 +413,19 @@ python -m tools.merge_batches --format both # merges all batch tables into one f
+ python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
+ ```
+ 
++### Example 7: sensitivity of the traits to the thresholds
++
++`tools/sensitivity.py` moves each threshold below and above its default (one at a
++time), reruns the pipeline on a random subset of samples, and reports for every
++trait the rank correlation with the default and the median relative change:
++
++```bash
++python -m tools.sensitivity --batch block1_t1 --batch block2_t2 --n 30 --workers 4
++```
++
++Output: `results/sensitivity/sensitivity_traits.csv` and
++`results/sensitivity/sensitivity_summary.csv`.
++
+ ---
+ 
+ ## Output files
+@@ -427,7 +439,8 @@ For each batch, in `results/<batch>/`:
+   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
+   `NRL_moyen_5_15`), are still read and renamed by the tools.
+ - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
+-  collar), kept laterals (blue), removed pollution (red), hypocotyl (orange,
++  collar, as used for the traits), pivot tip hook cut by the tip correction (brown,
++  dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
+   excluded), detached orphans (grey), original collar (green), raised collar
+   (purple diamond).
+ - **`checkpoint_traits.jsonl`**: resume state (delete to recompute).
+@@ -489,10 +502,6 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
+ - **`empty mask` error for a sample.** The file has no voxel above the binarization
+   threshold (empty or non-binary input). It is skipped and logged in
+   `failures.jsonl`; the rest of the batch continues.
+-- **`orphan cleanup SKIPPED` in the console.** The sample exceeded `ORPHAN_MAX_VOX`
+-  root voxels, so the memory-heavy cleanup was skipped. If many samples show this,
+-  raise `ORPHAN_MAX_VOX` (watch memory) or ask for the low-memory connected-
+-  components variant.
+ - **Timeouts.** Increase `TIMEOUT`, or lower `PARALLEL` if the machine is
+   oversubscribed. Timed-out samples are retried on the next run and recorded in
+   `failures.jsonl`.
+@@ -508,11 +517,11 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
+ - Trait quality depends on segmentation quality. Traits that **aggregate over all
+   segments** (total length, counts, branching order, density) get inflated by
+   residual surface pollution; traits that measure a **specific geometry** (primary
+-  root length, branching angles) are more robust. Volume traits computed on the raw
+-  mask (root volume, convex hull, surface, compactness) are the most sensitive.
++  root length, branching angles) are more robust. Volume traits (root volume, convex
++  hull, surface, compactness) are the most sensitive.
+ - The size and count traits are **highly redundant** (they mostly measure one
+   "system size" axis). Prefer a small non-redundant set over the full list.
+-- Treat `%removed`, `MaxO` and collar-related quantities as covariates / quality
++- Treat `%removed`, `MaxO` and collar-related quantities as covariates or quality
+   indicators rather than biological traits. Including the batch and `%removed` as
+   covariates removes most of the scan-quality confound.
+ - Keep `params_used.json` with your trait tables so the exact processing settings
+@@ -540,13 +549,15 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
+ │   ├── __init__.py
+ │   ├── merge_batches.py            Merge all batch tables into one file
+ │   ├── extract_checkpoint.py       Rebuild tables from checkpoints
+-│   └── figure_report.py            HTML index to review 3D figures (QC)
++│   ├── figure_report.py            HTML index to review 3D figures (QC)
++│   └── sensitivity.py              One-at-a-time sensitivity analysis of the thresholds
+ ├── docs/traits.md              Trait reference
+ ├── docs/limitations.md         Known limitations
+ ├── params.txt                  All settings + batch definitions
+ ├── example/params_example.txt  Ready-to-run config for the bundled example
+ ├── example/roots/sample_S1.npy Synthetic example dataset (versioned)
+ ├── tests/test_invariants.py    Invariant tests (pytest)
++├── tests/test_components.py    Unit tests: connectivity, pivot hook, root mask
+ ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
+ ├── validation/phantom_results.csv   Results of that check
+ ├── pyproject.toml              Package metadata (pip install -e .)
+diff --git a/docs/limitations.md b/docs/limitations.md
+index a70b02b..1183066 100644
+--- a/docs/limitations.md
++++ b/docs/limitations.md
+@@ -10,8 +10,11 @@ volume itself. Segmentation errors propagate directly into the traits:
+ 
+ - Surface "sheets" / dense pollution near the collar inflate any trait that
+   aggregates over segments (total length, counts, branching order, density).
+-- Volume traits computed on the raw mask (`CHV`, `VRT`, `SRT`, `IC`, `SRL`) are the
+-  most sensitive, and are affected by water content in the pot at scan time.
++- Volume traits (`CHV`, `VRT`, `SRT`, `IC`, `SRL`) are the most sensitive, and are
++  affected by water content in the pot at scan time. `VRT` and `SRT` are measured
++  on the part of the mask attached to the cleaned roots, so they exclude the
++  hypocotyl and removed artifacts, but they still depend on how thick the
++  segmentation draws each root.
+ 
+ The decontamination step removes a large part of this, but it cannot recover
+ information that the segmentation lost or invented. Use `%removed` as a
+@@ -30,12 +33,13 @@ Thresholds (decontamination, collar climb, hypocotyl angle) were tuned and
+ validated on soybean CT scans at a voxel size of about 0.39 x 0.39 x 0.2 mm. For a
+ different species, resolution, or imaging modality, revalidate visually. The voxel
+ size, the pruning length, the minimum segment length, the three decontamination
+-thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) and the orphan cleanup limit
+-(`ORPHAN_MAX_VOX`) can be adjusted in `params.txt`. The collar and hypocotyl
++thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) can be adjusted in `params.txt`. The collar and hypocotyl
+ thresholds (20% collar layer, 45 degree hypocotyl angle, 0.7 x collar radius for
+ the climb, 3 mm margin for high branches, 3 mm pivot hook cut) are fixed in the
+ code; changing them requires editing `run_pipeline.py`,
+-`rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`. The multi-format loader is implemented
++`rootctrait/detection_hypocotyle.py` or `rootctrait/root_traits_full.py`.
++`tools/sensitivity.py` measures how much each of these thresholds changes the
++traits, and should be rerun on any new dataset. The multi-format loader is implemented
+ for `.mat`, `.tif`, `.npy` and `.nii`, but has been tested most thoroughly on
+ `.mat`.
+ 
+diff --git a/docs/traits.md b/docs/traits.md
+index f80d61e..5da88a6 100644
+--- a/docs/traits.md
++++ b/docs/traits.md
+@@ -79,15 +79,18 @@ redundant with `ANGO2` and are no longer computed.
+ 
+ ## Volume and surface
+ 
+-`VRT` and `SRT` are computed on the complete binarized mask, so they include the
+-hypocotyl and any structure removed at the skeleton level. They are the most
+-sensitive traits to segmentation noise and to water content in the pot.
++`VRT` and `SRT` are computed on the part of the binarized mask attached to the
++cleaned roots: each mask voxel is assigned to its nearest skeleton voxel, and kept
++when that voxel belongs to the cleaned root system. The hypocotyl, removed sheets
++and orphan fragments are therefore excluded, consistently with the skeleton traits.
++They remain the most sensitive traits to segmentation and to water content in the
++pot.
+ 
+ | Trait | Definition                                                         | Unit   |
+ |-------|--------------------------------------------------------------------|--------|
+ | `CHV` | convex hull volume of the cleaned skeleton point cloud             | cm3    |
+-| `VRT` | root volume: voxel count of the mask times the voxel volume        | cm3    |
+-| `SRT` | root surface area: area of the marching cubes mesh of the mask     | cm2    |
++| `VRT` | root volume: voxel count of the cleaned root mask times the voxel volume | cm3 |
++| `SRT` | root surface area: area of the marching cubes mesh of the cleaned root mask | cm2 |
+ | `IC`  | compactness, `VRT` / `CHV` (set to missing when above 1)           | ---    |
+ | `SRL` | length per root volume, `TRL` / `VRT`                              | cm/cm3 |
+ 
+diff --git a/params.txt b/params.txt
+index 4e848c2..307e156 100644
+--- a/params.txt
++++ b/params.txt
+@@ -28,10 +28,6 @@ SAVE_FIGURES=0
+ ; Time limit per sample, in seconds
+ TIMEOUT=1800
+ 
+-; Orphan cleanup is skipped above this number of root skeleton voxels (memory).
+-; Each skip is logged in the console so that it stays traceable.
+-ORPHAN_MAX_VOX=90000
+-
+ ; Number of samples processed in parallel. 1 = serial processing (default).
+ ; Validate on a single batch before increasing it (the per sample time limit is kept).
+ PARALLEL=1
+diff --git a/pipeline_api.py b/pipeline_api.py
+index 04a5d4d..7a7e159 100644
+--- a/pipeline_api.py
++++ b/pipeline_api.py
+@@ -32,7 +32,6 @@ def default_params():
+         "PATTERN": "{name}.mat",
+         "DATA_ROOT": rp.DATA_ROOT,
+         "RESULTS_ROOT": rp.RESULTS_ROOT,
+-        "ORPHAN_MAX_VOX": rp.ORPHAN_MAX_VOX,
+         "PARALLEL": rp.PARALLEL,
+     }
+ 
+@@ -66,7 +65,6 @@ def _apply(params):
+     rp.DROP_ORPHANS = bool(params.get("DROP_ORPHANS", True))
+     rp.SAVE_FIGURES = bool(params.get("SAVE_FIGURES", True))
+     rp.TIMEOUT = int(params.get("TIMEOUT", 1800))
+-    rp.ORPHAN_MAX_VOX = int(params.get("ORPHAN_MAX_VOX", 90000))
+     rp.PARALLEL = max(1, int(params.get("PARALLEL", 1)))
+     rp.DATA_ROOT = params.get("DATA_ROOT", "data") or "data"
+     rp.RESULTS_ROOT = params.get("RESULTS_ROOT", "results")
+diff --git a/rootctrait/decontamination.py b/rootctrait/decontamination.py
+index d4b23a8..10c5cbe 100644
+--- a/rootctrait/decontamination.py
++++ b/rootctrait/decontamination.py
+@@ -77,6 +77,41 @@ def segment_features(segments, skv_full, voxel_size, rpar=RPAR, rnb=RNB):
+     return dict(bc=bc, lin=lin, length=length)
+ 
+ 
++# Half of the 26-neighbourhood: each touching voxel pair is visited once.
++_HALF_26 = np.array([d for d in np.ndindex(3, 3, 3)
++                     if (np.array(d) - 1).tolist() > [0, 0, 0]]) - 1
++
++
++def segment_adjacency(segments):
++    """Sparse segment graph for connectivity. Two segments touch when one of their
++    voxels is identical to, or 26-connected with, a voxel of the other (distance
++    <= sqrt(3) in voxel units). The graph has the same connected components as this
++    touching relation (a voxel shared by several segments links them to each other
++    rather than pairwise to every neighbour). Memory grows linearly with the number
++    of voxels (sorted voxel keys and binary search), so it is safe for very large
++    root systems."""
++    n = len(segments)
++    V = np.vstack([s['coords'] for s in segments]).astype(np.int64)
++    owner = np.concatenate([np.full(len(s['coords']), i, dtype=np.int64)
++                            for i, s in enumerate(segments)])
++    V = V - V.min(0) + 1                      # pad by one voxel on every side
++    dims = tuple(int(d) for d in V.max(0) + 2)
++    key = np.ravel_multi_index(V.T, dims)
++    order = np.argsort(key, kind='stable')
++    skey, sown = key[order], owner[order]
++    rows, cols = [], []
++    same = np.where(skey[1:] == skey[:-1])[0]     # one voxel shared by two segments
++    rows.append(sown[same]); cols.append(sown[same + 1])
++    for off in _HALF_26:
++        nk = np.ravel_multi_index((V + off).T, dims)
++        pos = np.minimum(np.searchsorted(skey, nk), len(skey) - 1)
++        hit = skey[pos] == nk
++        rows.append(owner[hit]); cols.append(sown[pos[hit]])
++    r = np.concatenate(rows); c = np.concatenate(cols); m = r != c
++    r, c = r[m], c[m]
++    return csr_matrix((np.ones(2 * len(r)), (np.r_[r, c], np.r_[c, r])), shape=(n, n))
++
++
+ def keep_base_component(segments, base):
+     """Keep only the segments connected to the collar (connected component of the base).
+     Two segments are connected if their voxels touch (distance <= sqrt(3)).
+@@ -84,16 +119,7 @@ def keep_base_component(segments, base):
+     n = len(segments)
+     if n <= 1:
+         return list(segments), []
+-    allvox = np.vstack([s['coords'] for s in segments])
+-    owner = np.concatenate([[i] * len(s['coords']) for i, s in enumerate(segments)])
+-    pairs = cKDTree(allvox).query_pairs(r=1.7321, output_type='ndarray')
+-    if len(pairs):
+-        oi = owner[pairs[:, 0]]; oj = owner[pairs[:, 1]]; m = oi != oj
+-        A = csr_matrix((np.ones(int(m.sum()) * 2),
+-                        (np.r_[oi[m], oj[m]], np.r_[oj[m], oi[m]])), shape=(n, n))
+-    else:
+-        A = csr_matrix((n, n))
+-    _, lab = connected_components(A, directed=False)
++    _, lab = connected_components(segment_adjacency(segments), directed=False)
+     # main component = the one containing the pivot (order 1).
+     # Fallback to the component closest to the collar if no order 1 exists.
+     order1 = [i for i, s in enumerate(segments) if s.get('order') == 1]
+diff --git a/rootctrait/detection_hypocotyle.py b/rootctrait/detection_hypocotyle.py
+index 424ee29..4aecc47 100644
+--- a/rootctrait/detection_hypocotyle.py
++++ b/rootctrait/detection_hypocotyle.py
+@@ -185,22 +185,26 @@ def add_high_branches(segments, column_ids, base, base2, voxel_size,
+     return ids
+ 
+ 
+-def collar_and_hypocotyl(sk, edt, kept, base, voxel_size):
++def collar_and_hypocotyl(sk, edt, kept, base, voxel_size,
++                         angle_max=45.0, frac=0.7, haut_min_mm=3.0):
+     """High-level function. Returns (base2, hypo_ids, gain_mm, column_pts).
++    angle_max, frac and haut_min_mm default to the published values (45 degrees,
++    0.7 x collar radius, 3 mm); they are exposed for the sensitivity analysis.
+ 
+     base2       : raised (bounded) collar, to use as the collar for the traits.
+     hypo_ids    : seg_ids of the hypocotyl segments to exclude (column + high branches).
+     gain_mm     : how far the collar was raised.
+     column_pts  : voxels of the thick column (for pivot extension / figure).
+     """
+-    col_ids, _, _ = vertical_column(kept, base, voxel_size)
++    col_ids, _, _ = vertical_column(kept, base, voxel_size, angle_max=angle_max)
+     # The collar always climbs along the thick column (it goes up to the top of the
+     # fleshy base). If a hypocotyl is present, it stops at its entrance; otherwise it
+     # climbs to the end of the thick column.
+     hypo_vox = set(tuple(v) for s in kept if s['seg_id'] in col_ids for v in s['coords'])
+-    base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size)
++    base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size, frac=frac)
+     if col_ids:
+-        hypo_ids = add_high_branches(kept, col_ids, base, base2, voxel_size)
++        hypo_ids = add_high_branches(kept, col_ids, base, base2, voxel_size,
++                                     haut_min_mm=haut_min_mm)
+     else:
+         hypo_ids = set()
+     return base2, hypo_ids, gain, column_pts
+diff --git a/rootctrait/root_traits_full.py b/rootctrait/root_traits_full.py
+index a874441..50886dc 100644
+--- a/rootctrait/root_traits_full.py
++++ b/rootctrait/root_traits_full.py
+@@ -77,7 +77,60 @@ def _insertion_angle(seg, parent, vs, mm=4.0, win=6):
+     return float(np.degrees(np.arccos(np.clip(cos, 0.0, 1.0))))
+ 
+ 
+-def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full):
++HOOK_MM = 3.0   # upward return at the pivot tip above which the tip is cut (mm)
++
++
++def cut_pivot_hook(primary_path, voxel_size, hook_mm=HOOK_MM):
++    """Pivot tip correction. A primary root plunges, it does not go back up. If the
++    pivot returns upward after its deepest point by more than `hook_mm` (a
++    skeletonization artifact, or the pivot "jumping" onto a neighbouring upward
++    root), the path is cut at its deepest point; smaller natural undulations are
++    tolerated. Returns (kept_path, cut_path); cut_path is empty when no cut is made.
++    Used both for the traits and for the review figure, so both show the same pivot."""
++    vs = np.asarray(voxel_size, float)
++    P = np.asarray(primary_path, int)
++    if len(P) > 2:
++        deepest = int(np.argmax(P[:, 0]))
++        if deepest < len(P) - 1 and (P[deepest, 0] - P[-1, 0]) * vs[0] > hook_mm:
++            return P[:deepest + 1], P[deepest:]
++    return P, P[:0]
++
++
++def root_mask(BW, all_segments, root_segments, primary_path, voxel_size, chunk=500000):
++    """Binary mask restricted to the cleaned root system. Every foreground voxel of
++    BW is assigned to its nearest skeleton voxel (physical distance) among all the
++    segments of the decomposition; it is kept when that skeleton voxel belongs to the
++    cleaned roots (or to the primary path). Material attached to the hypocotyl, to
++    removed sheets or to orphan fragments is therefore excluded, so that volume and
++    surface describe the same root system as the skeleton traits."""
++    vs = np.asarray(voxel_size, float)
++    ref = [s['coords'] for s in all_segments]
++    flag = [np.zeros(len(s['coords']), bool) for s in all_segments]
++    keep_ids = set(id(s) for s in root_segments)
++    for k, s in enumerate(all_segments):
++        if id(s) in keep_ids:
++            flag[k][:] = True
++    ref.append(np.asarray(primary_path, int).reshape(-1, 3))
++    flag.append(np.ones(len(ref[-1]), bool))
++    ref = np.vstack(ref).astype(np.int64); flag = np.concatenate(flag)
++    # a voxel shared by a kept and a removed segment counts as kept
++    key = np.ravel_multi_index(ref.T, BW.shape)
++    uk, inv = np.unique(key, return_inverse=True)
++    uflag = np.zeros(len(uk), bool); np.logical_or.at(uflag, inv, flag)
++    uvox = np.column_stack(np.unravel_index(uk, BW.shape))
++    tree = cKDTree(uvox * vs)
++    fg = np.argwhere(BW)
++    out = np.zeros_like(BW, dtype=bool)
++    for i in range(0, len(fg), chunk):
++        F = fg[i:i + chunk]
++        _, j = tree.query(F * vs)
++        F = F[uflag[j]]
++        out[F[:, 0], F[:, 1], F[:, 2]] = True
++    return out
++
++
++def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, skv_full,
++                       hook_mm=HOOK_MM):
+     vs = np.asarray(voxel_size, float)
+     base = np.asarray(base_rcp, float)
+     baseY = base[0] * vs[0]
+@@ -85,19 +138,7 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
+     T = {}
+ 
+     # ---- primary ----
+-    PPv = np.asarray(primary_path, int)
+-    # "Hook" correction: a primary root plunges, it does not go back up. If the
+-    # pivot tip goes back up (skeletonization artifact, or the pivot "jumping" onto
+-    # a neighbouring upward root), cut the pivot at its deepest point. This avoids
+-    # inflating LRP with a non-biological upward portion.
+-    if len(PPv) > 2:
+-        deepest = int(np.argmax(PPv[:, 0]))
+-        if deepest < len(PPv) - 1:
+-            # only cut if the rise is significant (>3mm), otherwise tolerate the
+-            # small natural undulations of the pivot
+-            rise_mm = (PPv[deepest, 0] - PPv[-1, 0]) * vs[0]
+-            if rise_mm > 3.0:
+-                PPv = PPv[:deepest + 1]
++    PPv, _ = cut_pivot_hook(primary_path, vs, hook_mm)
+     PP = PPv.astype(float) * vs
+     LRP = _len_phys(PP)
+     T['LRP'] = LRP
+@@ -185,7 +226,8 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
+     except Exception:
+         T['CHV'] = np.nan
+ 
+-    # ---- volume and surface from the mask ----
++    # ---- volume and surface from the mask (pass the mask restricted to the
++    # cleaned roots, see root_mask, so that IC and SRL combine consistent quantities) ----
+     vvol = float(np.prod(vs))
+     VRT = float(BW.sum()) * vvol
+     T['VRT'] = VRT
+diff --git a/run_pipeline.py b/run_pipeline.py
+index a30e600..4acc5fd 100644
+--- a/run_pipeline.py
++++ b/run_pipeline.py
+@@ -34,7 +34,7 @@ from openpyxl.utils import get_column_letter
+ from rootctrait.graph_extraction import prune_skeleton
+ from rootctrait.root_decomposition import decompose_root_system
+ from rootctrait.decontamination import decontaminate, keep_base_component
+-from rootctrait.root_traits_full import compute_all_traits
++from rootctrait.root_traits_full import compute_all_traits, cut_pivot_hook, root_mask
+ from rootctrait.detection_hypocotyle import collar_and_hypocotyl
+ from rootctrait.io_volume import load_volume
+ from rootctrait.legacy import upgrade_record
+@@ -83,9 +83,6 @@ LEN_MAX = float(PARAMS.get('LEN_MAX', '15'))
+ DROP_ORPHANS = PARAMS.get('DROP_ORPHANS', '1').lower() not in ('0', 'false', 'no')
+ SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
+ TIMEOUT = int(PARAMS.get('TIMEOUT', '1800'))
+-# Max root-voxel count above which the (memory-heavy) orphan cleanup is skipped.
+-# Exposed so the size-dependent behaviour is tunable and traceable, not a magic number.
+-ORPHAN_MAX_VOX = int(PARAMS.get('ORPHAN_MAX_VOX', '90000'))
+ # Number of samples processed concurrently. 1 = current serial behaviour (default).
+ PARALLEL = int(PARAMS.get('PARALLEL', '1'))
+ 
+@@ -111,7 +108,7 @@ COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm',
+         ('TOR', 'ratio', 1)]
+ 
+ 
+-def detect_base(sk, edt, voxel_size):
++def detect_base(sk, edt, voxel_size, layer=0.20):
+     """Collar detection: THICKEST point in the upper layer of the skeleton (the
+     shallowest 20% in depth). The true collar is the widest structure at the top of
+     the system; anchoring there straightens and re-centers the pivot. This is more
+@@ -121,14 +118,14 @@ def detect_base(sk, edt, voxel_size):
+     sc = np.argwhere(sk)
+     if len(sc) == 0:
+         raise ValueError("Empty skeleton")
+-    threshold = np.percentile(sc[:, 0], 20)
++    threshold = np.percentile(sc[:, 0], 100 * layer)
+     top = sc[sc[:, 0] <= threshold]
+     rad = edt[top[:, 0], top[:, 1], top[:, 2]]
+     return top[np.argmax(rad)]
+ 
+ 
+ def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hypocotyl=None,
+-                orphans=None, base=None, base2=None):
++                orphans=None, base=None, base2=None, pivot_hook=None):
+     try:
+         import plotly.graph_objects as go
+     except ImportError:
+@@ -161,6 +158,11 @@ def make_figure(name, kept, removed_segs, primary_path, fig_dir, voxel_size, hyp
+         P = np.asarray(primary_path) * vs
+         fig.add_trace(go.Scatter3d(x=P[:, 1], y=P[:, 2], z=P[:, 0], mode='lines',
+                                    line=dict(color='black', width=6), name='pivot'))
++    if pivot_hook is not None and len(pivot_hook):
++        H = np.asarray(pivot_hook) * vs
++        fig.add_trace(go.Scatter3d(x=H[:, 1], y=H[:, 2], z=H[:, 0], mode='lines',
++                                   line=dict(color='#8c564b', width=6, dash='dot'),
++                                   name='pivot tip hook (cut)'))
+     if base is not None:
+         b = np.asarray(base) * vs
+         fig.add_trace(go.Scatter3d(x=[b[1]], y=[b[2]], z=[b[0]], mode='markers',
+@@ -273,30 +275,25 @@ def process(name, ctx):
+     base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, voxel_size)
+     roots = [s for s in kept if s['seg_id'] not in hypo_ids]
+     hypocotyl = [s for s in kept if s['seg_id'] in hypo_ids]
+-    # Orphan cleanup: a single call to the existing function, after removing the
+-    # hypocotyl, to drop detached fragments. Memory guard on very large systems
+-    # (keep_base_component builds a tree of all voxels).
++    # Orphan cleanup: one connectivity pass after removing the hypocotyl drops the
++    # fragments it detached. Applied to every sample (memory grows linearly with the
++    # number of voxels, see segment_adjacency), so processing never depends on size.
+     orphans = []
+-    nvox_roots = sum(len(s['coords']) for s in roots)
+-    orphan_max = ctx.get('orphan_max_vox', 90000)
+-    if roots and nvox_roots <= orphan_max:
+-        try:
+-            roots, orphans = keep_base_component(roots, base)
+-        except Exception:
+-            orphans = []
+-    elif roots and nvox_roots > orphan_max:
+-        # Cleanup skipped to bound memory. Logged so that size-dependent processing
+-        # (a potential confound for GWAS) stays visible and auditable.
+-        print(f"  {name:6s} orphan cleanup SKIPPED (roots={nvox_roots} vox > {orphan_max})", flush=True)
++    if roots:
++        roots, orphans = keep_base_component(roots, base)
+     # Pivot extended up to the raised collar, so that the pivot length (LRP) starts
+     # at base2 (the true start of the primary root).
+     prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
+     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
+     if ctx['save_figures']:
+-        make_figure(name, roots, removed_segs, prim2, ctx['fig_dir'], voxel_size,
+-                    hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2)
++        prim_kept, prim_cut = cut_pivot_hook(prim2, voxel_size)
++        make_figure(name, roots, removed_segs, prim_kept, ctx['fig_dir'], voxel_size,
++                    hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2,
++                    pivot_hook=prim_cut)
++    # Volume and surface are measured on the mask restricted to the cleaned roots.
++    BW_roots = root_mask(BW, segs, roots, prim2, voxel_size)
+     # base2 = reference collar for the traits (depths, LRP, angles).
+-    T = compute_all_traits(roots, prim2, base2, BW, edt, voxel_size, skv_clean)
++    T = compute_all_traits(roots, prim2, base2, BW_roots, edt, voxel_size, skv_clean)
+     return n_raw, n_ret, T
+ 
+ 
+@@ -430,7 +427,6 @@ def _effective_params():
+         'len_max': LEN_MAX,
+         'drop_orphans': DROP_ORPHANS,
+         'save_figures': SAVE_FIGURES,
+-        'orphan_max_vox': ORPHAN_MAX_VOX,
+     }
+ 
+ 
+diff --git a/tests/test_components.py b/tests/test_components.py
+new file mode 100644
+index 0000000..4784bcd
+--- /dev/null
++++ b/tests/test_components.py
+@@ -0,0 +1,55 @@
++"""Unit tests for the connectivity, pivot hook and root mask helpers."""
++import os
++import sys
++import numpy as np
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++sys.path.insert(0, ROOT)
++
++from scipy.sparse.csgraph import connected_components
++from rootctrait.decontamination import segment_adjacency, keep_base_component
++from rootctrait.root_traits_full import cut_pivot_hook, root_mask
++
++VS = (0.39, 0.39, 0.2)
++
++
++def _seg(i, pts, order=2):
++    return {'seg_id': i, 'order': order, 'parent_seg': -1,
++            'coords': np.asarray(pts, int), 'length_mm': float(len(pts))}
++
++
++def test_corner_contact_connects():
++    a = _seg(0, [[5, 5, 5], [6, 5, 5]], order=1)
++    b = _seg(1, [[7, 6, 6], [8, 6, 6]])          # touches a by a voxel corner
++    c = _seg(2, [[20, 20, 20], [21, 20, 20]])    # isolated
++    n, lab = connected_components(segment_adjacency([a, b, c]), directed=False)
++    assert n == 2 and lab[0] == lab[1] != lab[2]
++    kept, orph = keep_base_component([a, b, c], base=(5, 5, 5))
++    assert [s['seg_id'] for s in kept] == [0, 1] and [s['seg_id'] for s in orph] == [2]
++
++
++def test_shared_voxel_connects():
++    a = _seg(0, [[1, 1, 1], [2, 2, 2]], order=1)
++    b = _seg(1, [[2, 2, 2], [9, 9, 9]])          # shares voxel (2, 2, 2)
++    n, _ = connected_components(segment_adjacency([a, b]), directed=False)
++    assert n == 1
++
++
++def test_hook_cut_and_tolerance():
++    down = [[d, 0, 0] for d in range(0, 40)]
++    hook = down + [[39 - k, 1, 0] for k in range(1, 12)]   # 11 voxels up = 4.3 mm
++    kept, cut = cut_pivot_hook(hook, VS)
++    assert kept[-1][0] == 39 and len(cut) == 12
++    small = down + [[39 - k, 1, 0] for k in range(1, 5)]   # 4 voxels up = 1.6 mm
++    kept, cut = cut_pivot_hook(small, VS)
++    assert len(kept) == len(small) and len(cut) == 0
++
++
++def test_root_mask_excludes_removed_material():
++    BW = np.zeros((30, 30, 30), bool)
++    BW[2:28, 4:7, 4:7] = True        # root column
++    BW[2:6, 15:25, 15:18] = True     # surface artifact
++    root = _seg(0, [[d, 5, 5] for d in range(3, 27)], order=1)
++    junk = _seg(1, [[3, x, 16] for x in range(16, 24)])
++    M = root_mask(BW, [root, junk], [root], root['coords'], VS)
++    assert M[2:28, 4:7, 4:7].all() and not M[2:6, 15:25, 15:18].any()
+diff --git a/tools/sensitivity.py b/tools/sensitivity.py
+new file mode 100644
+index 0000000..ae9f359
+--- /dev/null
++++ b/tools/sensitivity.py
+@@ -0,0 +1,184 @@
++"""sensitivity.py
++
++One-at-a-time sensitivity analysis of the RootCTrait thresholds.
++
++Each threshold is moved below and above its default while all the others keep their
++default value, the full pipeline is rerun on a random subset of samples, and every
++trait is compared with its default value. For each threshold, variant and trait the
++summary reports:
++
++  rho        Spearman rank correlation across samples between the variant and the
++             default (1 = the ranking of the samples is unchanged, which is what
++             matters for association analysis);
++  med_rel    median absolute relative change of the trait value, in percent.
++
++Thresholds read from params.txt (PRUNE_VOX, MIN_SEG_LEN_MM, BC_MIN, LIN_MAX,
++LEN_MAX) and thresholds fixed in the code (collar layer, hypocotyl angle, collar
++climb fraction, high branch margin, pivot hook cut) are all covered.
++
++Run from the project root, for example:
++    python -m tools.sensitivity --batch block1_t1 --n 30 --workers 4
++    python -m tools.sensitivity --batch block1_t1 --batch block2_t2 --n 20
++Output (in RESULTS_ROOT/sensitivity/):
++    sensitivity_traits.csv   one row per sample and variant, all traits
++    sensitivity_summary.csv  one row per threshold, variant and trait
++"""
++import argparse
++import functools
++import multiprocessing as mp
++import os
++import random
++import sys
++
++import numpy as np
++import pandas as pd
++
++PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++if PROJECT_ROOT not in sys.path:
++    sys.path.insert(0, PROJECT_ROOT)
++
++import run_pipeline as rp                                    # noqa: E402
++from rootctrait import detection_hypocotyle as dh            # noqa: E402
++from rootctrait import root_traits_full as rtf               # noqa: E402
++
++# threshold -> (default, low, high)
++FILE_PARAMS = {
++    'PRUNE_VOX': (rp.PRUNE_VOX, 3, 7),
++    'MIN_SEG_LEN_MM': (rp.MIN_SEG_LEN_MM, 1.5, 2.5),
++    'BC_MIN': (rp.BC_MIN, 2, 4),
++    'LIN_MAX': (rp.LIN_MAX, 0.6, 0.8),
++    'LEN_MAX': (rp.LEN_MAX, 10.0, 20.0),
++}
++CODE_PARAMS = {
++    'collar_layer': (0.20, 0.15, 0.25),
++    'hypocotyl_angle_deg': (45.0, 35.0, 55.0),
++    'climb_fraction': (0.7, 0.6, 0.8),
++    'high_branch_mm': (3.0, 2.0, 4.0),
++    'pivot_hook_mm': (rtf.HOOK_MM, 2.0, 4.0),
++}
++CTX_KEY = {'PRUNE_VOX': 'prune_vox', 'MIN_SEG_LEN_MM': 'min_seg_len_mm',
++           'BC_MIN': 'bc_min', 'LIN_MAX': 'lin_max', 'LEN_MAX': 'len_max'}
++
++
++def variants():
++    """('default', None, None) followed by every one-at-a-time low and high variant."""
++    out = [('default', None, None)]
++    for name, (_, lo, hi) in {**FILE_PARAMS, **CODE_PARAMS}.items():
++        out += [(name, 'low', lo), (name, 'high', hi)]
++    return out
++
++
++def _base_ctx(batch):
++    return {'data_dir': os.path.join(rp.DATA_ROOT, batch['name']),
++            'pattern': batch['pattern'], 'axis_order': batch['axis_order'],
++            'voxel_size': tuple(rp.VOXEL_SIZE), 'prune_vox': rp.PRUNE_VOX,
++            'min_seg_len_mm': rp.MIN_SEG_LEN_MM, 'bc_min': rp.BC_MIN,
++            'lin_max': rp.LIN_MAX, 'len_max': rp.LEN_MAX,
++            'drop_orphans': rp.DROP_ORPHANS, 'save_figures': False, 'fig_dir': None}
++
++
++def _run_one(task):
++    """Process one sample with one variant. The code-level thresholds are injected by
++    wrapping the pipeline functions inside this worker only."""
++    batch, sample, (param, side, value) = task
++    ctx = _base_ctx(batch)
++    code = {k: v[0] for k, v in CODE_PARAMS.items()}
++    if param in CTX_KEY:
++        ctx[CTX_KEY[param]] = value
++    elif param in code:
++        code[param] = value
++    rp.detect_base = functools.partial(_ORIG['detect_base'], layer=code['collar_layer'])
++    rp.collar_and_hypocotyl = functools.partial(
++        _ORIG['collar_and_hypocotyl'], angle_max=code['hypocotyl_angle_deg'],
++        frac=code['climb_fraction'], haut_min_mm=code['high_branch_mm'])
++    rp.compute_all_traits = functools.partial(_ORIG['compute_all_traits'],
++                                              hook_mm=code['pivot_hook_mm'])
++    try:
++        n_raw, n_rem, T = rp.process(sample, ctx)
++    except Exception as e:                                   # keep going, log the failure
++        return {'batch': batch['name'], 'sample': sample, 'parameter': param,
++                'side': side, 'value': value, 'error': repr(e)}
++    row = {'batch': batch['name'], 'sample': sample, 'parameter': param, 'side': side,
++           'value': value, 'n_raw': n_raw, 'n_removed': n_rem}
++    row.update({k: T.get(k) for k, _, _ in rp.COLS})
++    return row
++
++
++_ORIG = {'detect_base': rp.detect_base,
++         'collar_and_hypocotyl': dh.collar_and_hypocotyl,
++         'compute_all_traits': rtf.compute_all_traits}
++
++
++def summarize(df):
++    from scipy.stats import spearmanr
++    traits = [k for k, _, _ in rp.COLS]
++    key = ['batch', 'sample']
++    ref = df[df['parameter'] == 'default'].set_index(key)[traits]
++    rows = []
++    for (param, side), g in df[df['parameter'] != 'default'].groupby(['parameter', 'side']):
++        g = g.set_index(key)[traits]
++        common = ref.index.intersection(g.index)
++        for t in traits:
++            a = pd.to_numeric(ref.loc[common, t], errors='coerce')
++            b = pd.to_numeric(g.loc[common, t], errors='coerce')
++            ok = a.notna() & b.notna()
++            rho = spearmanr(a[ok], b[ok])[0] if ok.sum() >= 3 and a[ok].nunique() > 1 else np.nan
++            rel = (100 * (b[ok] - a[ok]).abs() / a[ok].abs().replace(0, np.nan)).median()
++            rows.append({'parameter': param, 'side': side, 'trait': t, 'n': int(ok.sum()),
++                         'rho': rho, 'med_rel_pct': rel})
++    return pd.DataFrame(rows)
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__.split('\n')[2])
++    ap.add_argument('--batch', action='append', required=True,
++                    help='batch name as defined in params.txt (repeatable)')
++    ap.add_argument('--n', type=int, default=30, help='samples drawn per batch (default 30)')
++    ap.add_argument('--seed', type=int, default=1)
++    ap.add_argument('--workers', type=int, default=1)
++    args = ap.parse_args()
++
++    defs = {b['name']: b for b in rp.BATCH_DEFS}
++    rng = random.Random(args.seed)
++    tasks = []
++    for name in args.batch:
++        if name not in defs:
++            sys.exit(f"Batch '{name}' is not defined in params.txt")
++        b = defs[name]
++        samples = rp.list_samples(os.path.join(rp.DATA_ROOT, name), b['pattern'])
++        pick = sorted(rng.sample(samples, min(args.n, len(samples))))
++        print(f"{name}: {len(pick)} of {len(samples)} samples")
++        tasks += [(b, s, v) for s in pick for v in variants()]
++    print(f"{len(tasks)} runs ({len(variants())} variants per sample)")
++
++    rows = []
++    if args.workers > 1:
++        with mp.Pool(args.workers) as pool:
++            for k, r in enumerate(pool.imap_unordered(_run_one, tasks), 1):
++                rows.append(r)
++                if k % 20 == 0:
++                    print(f"  {k}/{len(tasks)}", flush=True)
++    else:
++        for k, t in enumerate(tasks, 1):
++            rows.append(_run_one(t))
++            if k % 20 == 0:
++                print(f"  {k}/{len(tasks)}", flush=True)
++
++    out = os.path.join(rp.RESULTS_ROOT, 'sensitivity')
++    os.makedirs(out, exist_ok=True)
++    df = pd.DataFrame(rows)
++    df.to_csv(os.path.join(out, 'sensitivity_traits.csv'), index=False)
++    if 'error' in df.columns:
++        bad = df[df['error'].notna()]
++        print(f"{len(bad)} failed runs (see the error column)")
++        df = df[df['error'].isna()]
++    summ = summarize(df)
++    summ.to_csv(os.path.join(out, 'sensitivity_summary.csv'), index=False)
++    worst = summ.groupby(['parameter', 'side'])['rho'].min().sort_values()
++    print('\nLowest rank correlation per variant (over all traits):')
++    print(worst.round(3).to_string())
++    print(f"\n-> {out}")
++
++
++if __name__ == '__main__':
++    main()
+-- 
+2.43.0
+
+From 457a1d6b51c0c0a477137b58e97496401584e807 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 15:04:35 -0400
+Subject: [PATCH 3/3] Version 2.1.0: output names and volume traits differ from
+ the 2.0.0 release
+
+Released 2.0.0 still wrote French column names and whole-mask volumes, so
+the legacy reader now refers to versions before 2.1.0. CITATION.cff keeps
+the archived 2.0.0 entry until the 2.1.0 release receives its DOI.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PmEM2KX1GoYpy4haNdkRoA
+---
+ README.md                   | 4 ++--
+ pyproject.toml              | 2 +-
+ rootctrait/__init__.py      | 2 +-
+ rootctrait/legacy.py        | 2 +-
+ tools/extract_checkpoint.py | 2 +-
+ tools/merge_batches.py      | 2 +-
+ 6 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/README.md b/README.md
+index c180a51..50edf6f 100644
+--- a/README.md
++++ b/README.md
+@@ -435,7 +435,7 @@ For each batch, in `results/<batch>/`:
+ - **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
+   diameters in mm, volumes in cm3, angles in degrees). Columns `n_raw`
+   (segments before cleaning), `n_removed` and `%removed` report the
+-  decontamination. Tables and checkpoints written by versions before 2.0.0, which
++  decontamination. Tables and checkpoints written by versions before 2.1.0, which
+   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
+   `NRL_moyen_5_15`), are still read and renamed by the tools.
+ - **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
+@@ -544,7 +544,7 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
+ │   ├── decontamination.py          Parallel sheets + orphan fragments
+ │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
+ │   ├── root_traits_full.py         Full trait set
+-│   └── legacy.py                   Former column names (reads files from versions < 2.0.0)
++│   └── legacy.py                   Former column names (reads files from versions < 2.1.0)
+ ├── tools/                      Post-processing utilities (also in the app's Tools tab)
+ │   ├── __init__.py
+ │   ├── merge_batches.py            Merge all batch tables into one file
+diff --git a/pyproject.toml b/pyproject.toml
+index ab81b9c..6889960 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "rootctrait"
+-version = "2.0.0"
++version = "2.1.0"
+ description = "Automated 3D root system architecture trait extraction from segmented CT volumes"
+ readme = "README.md"
+ requires-python = ">=3.10"
+diff --git a/rootctrait/__init__.py b/rootctrait/__init__.py
+index 1ffd17d..ce1917e 100644
+--- a/rootctrait/__init__.py
++++ b/rootctrait/__init__.py
+@@ -1,5 +1,5 @@
+ """RootCTrait: 3D root system architecture trait extraction from segmented CT volumes."""
+-__version__ = "2.0.0"
++__version__ = "2.1.0"
+ 
+ from .io_volume import load_volume
+ from .graph_extraction import prune_skeleton
+diff --git a/rootctrait/legacy.py b/rootctrait/legacy.py
+index ce084ba..b01ccf6 100644
+--- a/rootctrait/legacy.py
++++ b/rootctrait/legacy.py
+@@ -1,6 +1,6 @@
+ """Former output column names, kept only to read files written by earlier versions.
+ 
+-Versions before 2.0.0 wrote some table columns and checkpoint keys with French
++Versions before 2.1.0 wrote some table columns and checkpoint keys with French
+ names. They are renamed to their English equivalents when an old checkpoint or
+ trait table is read, so that partial runs can be resumed and old tables merged.
+ """
+diff --git a/tools/extract_checkpoint.py b/tools/extract_checkpoint.py
+index 92eaaf0..b32dec6 100644
+--- a/tools/extract_checkpoint.py
++++ b/tools/extract_checkpoint.py
+@@ -8,7 +8,7 @@ has been written so far and produces a trait table of the samples already done.
+ 
+ Each checkpoint line holds: name, n_raw, n_removed, and T (the 38 traits). The output
+ mirrors the normal table: ID, n_raw, n_removed, %removed, then the traits.
+-Checkpoints written by versions before 2.0.0 (French key names) are read too.
++Checkpoints written by versions before 2.1.0 (French key names) are read too.
+ 
+ Run:  python extract_checkpoint.py                     (scan results/<batch>/)
+       python extract_checkpoint.py path/to/checkpoint_traits.jsonl
+diff --git a/tools/merge_batches.py b/tools/merge_batches.py
+index 22f19d7..4af0553 100644
+--- a/tools/merge_batches.py
++++ b/tools/merge_batches.py
+@@ -56,7 +56,7 @@ def read_batch_table(path):
+         return None
+     df = df[df["ID"].notna()].copy()                # drop the units row (ID is blank)
+     df = df.dropna(how="all")
+-    return upgrade_columns(df)                      # tables from versions < 2.0.0
++    return upgrade_columns(df)                      # tables from versions < 2.1.0
+ 
+ 
+ def main():
+-- 
+2.43.0
+
