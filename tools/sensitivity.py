@@ -13,7 +13,7 @@ summary reports:
   med_rel    median absolute relative change of the trait value, in percent.
 
 Thresholds read from params.txt (PRUNE_VOX, MIN_SEG_LEN_MM, BC_MIN, LIN_MAX,
-LEN_MAX) and thresholds fixed in the code (collar layer, hypocotyl angle, collar
+LEN_MAX, DENS_MAX, DENS_LEN_MAX, RESCUE_MIN_MM) and thresholds fixed in the code (collar layer, hypocotyl angle, collar
 climb fraction, high branch margin) are all covered.
 
 Run from the project root, for example:
@@ -48,6 +48,9 @@ FILE_PARAMS = {
     'BC_MIN': (rp.BC_MIN, 2, 4),
     'LIN_MAX': (rp.LIN_MAX, 0.6, 0.8),
     'LEN_MAX': (rp.LEN_MAX, 10.0, 20.0),
+    'DENS_MAX': (rp.DENS_MAX, 30.0, 40.0),
+    'DENS_LEN_MAX': (rp.DENS_LEN_MAX, 4.0, 8.0),
+    'RESCUE_MIN_MM': (rp.RESCUE_MIN_MM, 3.0, 8.0),
 }
 CODE_PARAMS = {
     'collar_layer': (0.20, 0.15, 0.25),
@@ -56,7 +59,8 @@ CODE_PARAMS = {
     'high_branch_mm': (3.0, 2.0, 4.0),
 }
 CTX_KEY = {'PRUNE_VOX': 'prune_vox', 'MIN_SEG_LEN_MM': 'min_seg_len_mm',
-           'BC_MIN': 'bc_min', 'LIN_MAX': 'lin_max', 'LEN_MAX': 'len_max'}
+           'BC_MIN': 'bc_min', 'LIN_MAX': 'lin_max', 'LEN_MAX': 'len_max',
+           'DENS_MAX': 'dens_max', 'DENS_LEN_MAX': 'dens_len_max', 'RESCUE_MIN_MM': 'rescue_min_mm'}
 
 
 def variants():
@@ -73,7 +77,9 @@ def _base_ctx(batch):
             'voxel_size': tuple(rp.VOXEL_SIZE), 'prune_vox': rp.PRUNE_VOX,
             'min_seg_len_mm': rp.MIN_SEG_LEN_MM, 'bc_min': rp.BC_MIN,
             'lin_max': rp.LIN_MAX, 'len_max': rp.LEN_MAX,
-            'drop_orphans': rp.DROP_ORPHANS, 'save_figures': False, 'fig_dir': None}
+            'drop_orphans': rp.DROP_ORPHANS, 'dens_max': rp.DENS_MAX,
+            'dens_len_max': rp.DENS_LEN_MAX, 'rescue_min_mm': rp.RESCUE_MIN_MM,
+            'save_figures': False, 'fig_dir': None}
 
 
 def _run_one(task):

@@ -21,6 +21,14 @@ MIN_SEG_LEN_MM=2.0
 BC_MIN=3
 LIN_MAX=0.7
 LEN_MAX=15
+; Dense rule: a segment is also removed when the skeleton around it is dense
+; (DENS_MAX skeleton voxels or more within 2 mm) and it is shorter than DENS_LEN_MAX (mm).
+; DENS_MAX=0 disables the dense rule.
+DENS_MAX=35
+DENS_LEN_MAX=6
+; Detached fragments at least RESCUE_MIN_MM long (mm) and not dense are kept as roots
+; and joined back to the system; 0 disables the rescue.
+RESCUE_MIN_MM=5
 ; 1 = after decontamination, keep only the component that contains the primary root
 DROP_ORPHANS=1
 ; 1 = write one interactive HTML figure per sample (requires plotly)

@@ -82,8 +82,10 @@ redundant with `ANGO2` and are no longer computed.
 
 `VRT` and `SRT` are computed on the part of the binarized mask attached to the
 cleaned roots: each mask voxel is assigned to its nearest skeleton voxel, and kept
-when that voxel belongs to the cleaned root system. The hypocotyl, removed sheets
-and orphan fragments are therefore excluded, consistently with the skeleton traits.
+when that voxel belongs to the cleaned root system. Mask components that are not
+connected to the cleaned roots are excluded first. The hypocotyl, removed layers,
+orphan and isolated fragments are therefore excluded, consistently with the
+skeleton traits.
 They remain the most sensitive traits to segmentation and to water content in the
 pot.
 

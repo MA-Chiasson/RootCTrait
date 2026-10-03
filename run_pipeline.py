@@ -33,7 +33,7 @@ from openpyxl.utils import get_column_letter
 
 from rootctrait.graph_extraction import prune_skeleton
 from rootctrait.root_decomposition import decompose_root_system
-from rootctrait.decontamination import decontaminate, keep_base_component
+from rootctrait.decontamination import decontaminate, keep_base_component, reattach
 from rootctrait.root_traits_full import compute_all_traits, split_pivot_return, root_mask
 from rootctrait.detection_hypocotyle import collar_and_hypocotyl
 from rootctrait.io_volume import load_volume
@@ -81,6 +81,9 @@ BC_MIN = int(PARAMS.get('BC_MIN', '3'))
 LIN_MAX = float(PARAMS.get('LIN_MAX', '0.7'))
 LEN_MAX = float(PARAMS.get('LEN_MAX', '15'))
 DROP_ORPHANS = PARAMS.get('DROP_ORPHANS', '1').lower() not in ('0', 'false', 'no')
+DENS_MAX = float(PARAMS.get('DENS_MAX', '35'))
+DENS_LEN_MAX = float(PARAMS.get('DENS_LEN_MAX', '6'))
+RESCUE_MIN_MM = float(PARAMS.get('RESCUE_MIN_MM', '5'))
 SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
 TIMEOUT = int(PARAMS.get('TIMEOUT', '1800'))
 # Number of samples processed concurrently. 1 = current serial behaviour (default).
@@ -251,22 +254,63 @@ def process(name, ctx):
     V = load_volume(path, axis_order=ctx['axis_order'], var_name=ctx.get('var_name'))
     vmax = float(np.max(V)) if V.size else 0.0
     BW = V > (0.5 * vmax)
-    c = np.argwhere(BW)
-    if c.size == 0:
+    if not BW.any():
         raise ValueError(f"empty mask (no voxel above threshold) for '{name}'")
+    R = analyse_mask(BW, ctx)
+    if ctx['save_figures']:
+        prim_down, prim_up = split_pivot_return(R['prim2'], voxel_size)
+        make_figure(name, R['roots'], R['removed'], prim_down, ctx['fig_dir'], voxel_size,
+                    hypocotyl=R['hypocotyl'], orphans=R['orphans'], base=R['base'], base2=R['base2'],
+                    pivot_hook=prim_up)
+    return R['n_raw'], R['n_removed'], R['T']
+
+
+def analyse_mask(BW, ctx):
+    """Full processing of one binary mask (cropping, skeleton, decomposition,
+    decontamination, collar and hypocotyl, traits). Returns a dict with the traits
+    and the intermediate results (used by the figures and the validation scripts)."""
+    voxel_size = tuple(ctx['voxel_size'])
+    c = np.argwhere(BW)
     mn = c.min(0); mx = c.max(0); m = 6
-    BW = BW[tuple(slice(max(0, mn[i] - m), mx[i] + m) for i in range(3))]
+    crop = tuple(slice(max(0, mn[i] - m), mx[i] + m) for i in range(3))
+    BW = BW[crop]
     edt = ndimage.distance_transform_edt(BW, sampling=voxel_size)
     sk = skeletonize(BW).astype(bool)
     sk = prune_skeleton(sk, min_branch_length_vox=ctx['prune_vox'])
     base = detect_base(sk, edt, voxel_size)
-    segs, prim, voxels, border, bnode = decompose_root_system(
-        sk, base, list(voxel_size), dist_map=edt,
-        min_seg_len_mm=ctx['min_seg_len_mm'], crown_exclude_mm=0.0)
+    decomp_kw = dict(dist_map=edt, min_seg_len_mm=ctx['min_seg_len_mm'], crown_exclude_mm=0.0)
+    segs, prim, voxels, border, bnode = decompose_root_system(sk, base, list(voxel_size), **decomp_kw)
     n_raw = len(segs)
-    kept, removed_segs, feats = decontaminate(segs, voxels, voxel_size, base=base,
-                                              bc_min=ctx['bc_min'], lin_max=ctx['lin_max'], len_max=ctx['len_max'],
-                                              drop_orphans=ctx['drop_orphans'])
+    kept, removed_segs, feats = decontaminate(
+        segs, voxels, voxel_size, base=base, bc_min=ctx['bc_min'], lin_max=ctx['lin_max'],
+        len_max=ctx['len_max'], drop_orphans=ctx['drop_orphans'],
+        dens_max=ctx.get('dens_max', 35), dens_len_max=ctx.get('dens_len_max', 6.0),
+        rescue_min_mm=ctx.get('rescue_min_mm', 5.0))
+    # Rescued fragments (genuine roots whose only link ran through a removed layer)
+    # are joined back by the shortest skeleton path. Whenever decontamination changed
+    # the skeleton, the ordered tree is rebuilt on the cleaned skeleton, so that the
+    # primary root is chosen among genuine roots only and rescued roots recover a
+    # parent and an order.
+    mask_segs = segs
+    rescued = feats.get('rescued', [])
+    n_rescued = 0
+    joined, bridge = [], np.zeros((0, 3), int)
+    if rescued:
+        bridge, joined, not_joined = reattach(segs, kept, rescued, voxel_size)
+        removed_segs = removed_segs + not_joined
+    if removed_segs or joined:
+        clean = np.zeros_like(sk)
+        for s_ in kept + joined:
+            clean[tuple(s_['coords'].T)] = True
+        if len(bridge):
+            clean[tuple(bridge.T)] = True
+        if clean[tuple(base)]:
+            segs2, prim, _, _, _ = decompose_root_system(clean, base, list(voxel_size), **decomp_kw)
+            kept = segs2
+            mask_segs = removed_segs + segs2
+            n_rescued = len(joined)
+        else:
+            removed_segs = removed_segs + joined
     n_ret = len(removed_segs)
     # --- Bounded collar + hypocotyl (refined version) ---
     # base2 = collar raised along the thick column up to the hypocotyl (start of the
@@ -285,16 +329,13 @@ def process(name, ctx):
     # at base2 (the true start of the primary root).
     prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
-    if ctx['save_figures']:
-        prim_down, prim_up = split_pivot_return(prim2, voxel_size)
-        make_figure(name, roots, removed_segs, prim_down, ctx['fig_dir'], voxel_size,
-                    hypocotyl=hypocotyl, orphans=orphans, base=base, base2=base2,
-                    pivot_hook=prim_up)
     # Volume and surface are measured on the mask restricted to the cleaned roots.
-    BW_roots = root_mask(BW, segs, roots, prim2, voxel_size)
+    BW_roots = root_mask(BW, mask_segs, roots, prim2, voxel_size)
     # base2 = reference collar for the traits (depths, LRP, angles).
     T = compute_all_traits(roots, prim2, base2, BW_roots, edt, voxel_size, skv_clean)
-    return n_raw, n_ret, T
+    return dict(T=T, n_raw=n_raw, n_removed=n_ret, n_rescued=n_rescued, crop=crop,
+                base=base, base2=base2, prim2=prim2, segs=segs, kept=kept, removed=removed_segs,
+                roots=roots, hypocotyl=hypocotyl, orphans=orphans, feats=feats, gain=gain)
 
 
 def write_excel(results, out_xlsx, title):
@@ -428,6 +469,9 @@ def _effective_params():
         'lin_max': LIN_MAX,
         'len_max': LEN_MAX,
         'drop_orphans': DROP_ORPHANS,
+        'dens_max': DENS_MAX,
+        'dens_len_max': DENS_LEN_MAX,
+        'rescue_min_mm': RESCUE_MIN_MM,
         'save_figures': SAVE_FIGURES,
     }
 

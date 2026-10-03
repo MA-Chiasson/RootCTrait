@@ -7,14 +7,24 @@ Two geometric steps, uniform across all samples (GWAS compatible):
      - low linearity: lin < LIN_MAX (sheet-like neighborhood rather than a line)
      - short        : length < LEN_MAX mm
 
+   Dense rule: a segment is also removed if the skeleton around it is dense
+   (dens >= DENS_MAX voxels within RDENS mm, a mesh rather than a line) and it is
+   short (length < DENS_LEN_MAX mm). This catches the parts of surface layers whose
+   skeleton is a mesh rather than a ladder of parallel lines.
+
 2. Floating fragments: after step 1, only the segments still connected to the
    collar are kept (connected component containing the base). Segments that were
-   attached to the system only through removed pollution become orphans and are
-   discarded in turn.
+   attached to the system only through removed pollution become orphans. An orphan
+   group that looks like a root (total length >= RESCUE_MIN_MM, median dens below
+   DENS_MAX) is rescued: a genuine root whose only link to the system ran through a
+   removed layer. The others are discarded. Rescued groups are returned in
+   features['rescued'] and reattached to the system by reattach().
 
 bc  : number of neighbors (centroid within rpar) that are parallel (|cos| > 0.9)
       and laterally offset (|cos of the offset direction| < 0.5).
 lin : linearity (l1 - l2) / l1 of the PCA of the skeleton neighborhood around the segment.
+dens: median, over the voxels of the segment, of the number of skeleton voxels within
+      RDENS mm.
 
 Axis convention: col0 = Y (depth), col1 = X, col2 = Z.
 """
@@ -28,6 +38,10 @@ LIN_MAX = 0.7
 LEN_MAX = 15.0
 RPAR = 6.0
 RNB = 6.0
+DENS_MAX = 35
+DENS_LEN_MAX = 6.0
+RESCUE_MIN_MM = 5.0
+RDENS = 2.0
 
 
 def _seg_dir(coords_phys):
@@ -74,7 +88,13 @@ def segment_features(segments, skv_full, voxel_size, rpar=RPAR, rnb=RNB):
                 ev = np.linalg.svd(Q, full_matrices=False)[1] ** 2
                 ev = ev / ev.sum()
                 lin[i] = (ev[0] - ev[1]) / (ev[0] + 1e-9)
-    return dict(bc=bc, lin=lin, length=length)
+    dens = np.zeros(n)
+    if n:
+        U = np.unique(np.vstack([sg['coords'] for sg in segments]), axis=0).astype(float) * vs
+        ut = cKDTree(U)
+        for i, sgm in enumerate(segments):
+            dens[i] = np.median(ut.query_ball_point(sgm['coords'] * vs, RDENS, return_length=True))
+    return dict(bc=bc, lin=lin, length=length, dens=dens)
 
 
 # Half of the 26-neighbourhood: each touching voxel pair is visited once.
@@ -134,14 +154,69 @@ def keep_base_component(segments, base):
 
 
 def decontaminate(segments, skv_full, voxel_size, base=None,
-                  bc_min=BC_MIN, lin_max=LIN_MAX, len_max=LEN_MAX, drop_orphans=True):
-    """Remove the sheets, then the floating fragments.
-    Returns (kept_segments, removed_segments, features)."""
+                  bc_min=BC_MIN, lin_max=LIN_MAX, len_max=LEN_MAX, drop_orphans=True,
+                  dens_max=DENS_MAX, dens_len_max=DENS_LEN_MAX, rescue_min_mm=RESCUE_MIN_MM):
+    """Remove the sheets (sheet rule and dense rule), then the floating fragments,
+    except the root-like ones, which are rescued.
+    Returns (kept_segments, removed_segments, features); features['rescued'] lists
+    the rescued segments, which are NOT in kept_segments (see reattach)."""
     f = segment_features(segments, skv_full, voxel_size)
     rule_removed = (f['bc'] >= bc_min) & (f['lin'] < lin_max) & (f['length'] < len_max)
+    if dens_max is not None and dens_max > 0:
+        rule_removed |= (f['dens'] >= dens_max) & (f['length'] < dens_len_max)
     kept = [s for s, r in zip(segments, rule_removed) if not r]
     removed = [s for s, r in zip(segments, rule_removed) if r]
+    rescued = []
     if drop_orphans and base is not None and len(kept) > 1:
         kept, orphan = keep_base_component(kept, base)
+        if orphan and rescue_min_mm and rescue_min_mm > 0:
+            dens_of = {id(s): d for s, d in zip(segments, f['dens'])}
+            _, lab = connected_components(segment_adjacency(orphan), directed=False)
+            for c in np.unique(lab):
+                comp = [o for o, l in zip(orphan, lab) if l == c]
+                if (sum(o['length_mm'] for o in comp) >= rescue_min_mm and
+                        np.median([dens_of[id(o)] for o in comp]) < (dens_max or np.inf)):
+                    rescued += comp
+            rid = set(id(o) for o in rescued)
+            orphan = [o for o in orphan if id(o) not in rid]
         removed += orphan
+    f['rule'] = rule_removed
+    f['rescued'] = rescued
     return kept, removed, f
+
+
+def reattach(segments, kept, rescued, voxel_size):
+    """Join each rescued fragment to the kept system by the shortest path on the
+    skeleton of the decomposition (which runs through the removed layer that hid the
+    connection). Returns (bridge_voxels, joined, not_joined): the voxels of the
+    bridging paths, and the rescued segments that could or could not be joined."""
+    from scipy.sparse.csgraph import dijkstra
+    from .graph_extraction import build_skel_graph
+    if not rescued or not kept:
+        return np.zeros((0, 3), int), [], list(rescued)
+    vs = np.asarray(voxel_size, float)
+    allv = np.unique(np.vstack([s['coords'] for s in segments]), axis=0)
+    lo = allv.min(0); shp = tuple(allv.max(0) - lo + 1)
+    sk = np.zeros(shp, bool); sk[tuple((allv - lo).T)] = True
+    graph, vox, v2n = build_skel_graph(sk, voxel_size=vs)
+    node = lambda C: v2n[tuple((np.asarray(C) - lo).T)]
+    src = np.unique(np.concatenate([node(s['coords']) for s in kept]))
+    dist, pred, _ = dijkstra(graph, directed=False, indices=src, min_only=True,
+                             return_predecessors=True)
+    _, lab = connected_components(segment_adjacency(rescued), directed=False)
+    bridges, joined, not_joined = [], [], []
+    for c in np.unique(lab):
+        comp = [o for o, l in zip(rescued, lab) if l == c]
+        nodes = np.unique(np.concatenate([node(o['coords']) for o in comp]))
+        k = nodes[np.argmin(dist[nodes])]
+        if not np.isfinite(dist[k]):
+            not_joined += comp
+            continue
+        path = []
+        while k >= 0:
+            path.append(k)
+            k = pred[k]
+        bridges.append(vox[path] + lo)
+        joined += comp
+    B = np.vstack(bridges) if bridges else np.zeros((0, 3), int)
+    return B, joined, not_joined

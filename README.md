@@ -67,7 +67,13 @@ For each sample:
    of the system in depth.
 4. **Decompose** the skeleton into ordered segments (order 1 = primary root,
    order 2 = laterals, etc.).
-5. **Decontaminate**: remove parallel sheets and floating fragments.
+5. **Decontaminate**: remove the surface layers (sheet rule: parallel, sheet-like
+   and short segments; dense rule: short segments whose surrounding skeleton is a
+   dense mesh), then the fragments left detached. Detached fragments that look like
+   roots (at least 5 mm long and not dense) are rescued: they are joined back to
+   the system by the shortest skeleton path through the removed layer, and the
+   ordered tree is rebuilt on the cleaned skeleton, so that rescued roots recover a
+   parent and an order and the primary root is chosen among genuine roots only.
 6. **Raise the collar and exclude the hypocotyl**: the collar climbs along the
    thick base column and stops at the hypocotyl; the hypocotyl (vertical stem
    column above the collar plus the branches hanging high on it) is excluded,
@@ -207,6 +213,9 @@ Fields marked `*` are required. The one you must set is the **output folder
 | Sheet: parallel neighbours   | decontamination `BC_MIN`                            |
 | Sheet: max linearity         | decontamination `LIN_MAX`                           |
 | Sheet: max length (mm)       | decontamination `LEN_MAX`                           |
+| Dense rule: min density      | decontamination `DENS_MAX` (0 disables)             |
+| Dense rule: max length (mm)  | decontamination `DENS_LEN_MAX`                      |
+| Rescue: min length (mm)      | rescue of detached root-like fragments `RESCUE_MIN_MM` (0 disables) |
 | Timeout per sample (s)       | per-sample time limit                               |
 | Drop orphan fragments        | remove detached fragments (on/off)                  |
 | Save 3D figures              | write the interactive HTML figures (on/off)         |
@@ -263,6 +272,9 @@ All settings live in `params.txt`. Keys are case-insensitive. Lines starting wit
 | `BC_MIN`        | `3`            | decontamination: min parallel neighbours for a sheet       |
 | `LIN_MAX`       | `0.7`          | decontamination: max linearity for a sheet                 |
 | `LEN_MAX`       | `15`           | decontamination: max length for a sheet (mm)               |
+| `DENS_MAX`      | `35`           | dense rule: skeleton voxels within 2 mm (0 disables)        |
+| `DENS_LEN_MAX`  | `6`            | dense rule: max segment length (mm)                        |
+| `RESCUE_MIN_MM` | `5`            | min length of a detached fragment to rescue (mm, 0 = off)  |
 | `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
 | `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
 | `TIMEOUT`       | `1800`         | per-sample time limit (seconds)                            |
@@ -545,7 +557,7 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── io_volume.py                Multi-format loading of 3D volumes
 │   ├── graph_extraction.py         Skeleton graph, branch points, pruning
 │   ├── root_decomposition.py       Decomposition into ordered roots
-│   ├── decontamination.py          Parallel sheets + orphan fragments
+│   ├── decontamination.py          Surface layers, orphan fragments, rescue
 │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
 │   ├── root_traits_full.py         Full trait set
 │   └── legacy.py                   Former column names (reads files from versions < 2.1.0)
@@ -564,6 +576,9 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 ├── tests/test_components.py    Unit tests: connectivity, pivot hook, root mask
 ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
 ├── validation/phantom_results.csv   Results of that check
+├── validation/realistic_phantoms.py Phantoms at four levels of difficulty (shape,
+│                                    contacts, real surface layers, hypocotyl)
+├── validation/data/                 Surface layers cut from a real scan, used by it
 ├── pyproject.toml              Package metadata (pip install -e .)
 ├── requirements.txt
 ├── CITATION.cff                Citation metadata

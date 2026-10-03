@@ -1,6 +1,8 @@
 # user data and outputs (not versioned)
 data/
 results/
+!validation/data/
+validation/realistic/
 
 # desktop app session (local folder paths) and generated review reports
 app_session.json

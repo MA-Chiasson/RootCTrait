@@ -17,7 +17,11 @@ volume itself. Segmentation errors propagate directly into the traits:
   segmentation draws each root.
 
 The decontamination step removes a large part of this, but it cannot recover
-information that the segmentation lost or invented. Use `%removed` as a
+information that the segmentation lost or invented. On synthetic root systems
+carrying surface layers cut from a real scan (`validation/realistic_phantoms.py`),
+about half to two thirds of the layer skeleton is removed, and the remainder is
+counted as roots; a few percent of genuine root length running through a layer can
+be lost. Use `%removed` as a
 scan-quality covariate, and inspect flagged samples with the 3D figures.
 
 ## 2. Oblique or poorly segmented hypocotyls can be missed
@@ -32,8 +36,9 @@ limited effect on the traits; larger oblique hypocotyls are worth a visual check
 Thresholds (decontamination, collar climb, hypocotyl angle) were tuned and
 validated on soybean CT scans at a voxel size of about 0.39 x 0.39 x 0.2 mm. For a
 different species, resolution, or imaging modality, revalidate visually. The voxel
-size, the pruning length, the minimum segment length, the three decontamination
-thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`) can be adjusted in `params.txt`. The collar and hypocotyl
+size, the pruning length, the minimum segment length, the decontamination
+thresholds (`BC_MIN`, `LIN_MAX`, `LEN_MAX`, `DENS_MAX`, `DENS_LEN_MAX`) and the
+rescue length (`RESCUE_MIN_MM`) can be adjusted in `params.txt`. The collar and hypocotyl
 thresholds (20% collar layer, 45 degree hypocotyl angle, 0.7 x collar radius for
 the climb, 3 mm margin for high branches) are fixed in the
 code; changing them requires editing `run_pipeline.py`,

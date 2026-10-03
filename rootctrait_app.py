@@ -299,6 +299,9 @@ PARAM_FIELDS = [
     ("LIN_MAX",      "Sheet: max linearity",         "float", False),
     ("LEN_MAX",      "Sheet: max length (mm)",       "float", False),
     ("TIMEOUT",      "Timeout per sample (s)",       "int",   False),
+    ("DENS_MAX",     "Dense rule: min density",      "float", False),
+    ("DENS_LEN_MAX", "Dense rule: max length (mm)",  "float", False),
+    ("RESCUE_MIN_MM","Rescue: min length (mm)",      "float", False),
     ("DROP_ORPHANS", "Drop orphan fragments",        "bool",  False),
     ("SAVE_FIGURES", "Save 3D figures",              "bool",  False),
 ]

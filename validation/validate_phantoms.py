@@ -75,20 +75,11 @@ def make_phantom(n_lat, lat_len_vox, spread_vox, pivot_len_vox=150, seed=0):
 
 
 def measure(V):
-    BW = V > 0.5 * V.max()
-    c = np.argwhere(BW); mn = c.min(0); mx = c.max(0); m = 6
-    BW = BW[tuple(slice(max(0, mn[i]-m), mx[i]+m) for i in range(3))]
-    edt = ndimage.distance_transform_edt(BW, sampling=VOXEL)
-    sk = prune_skeleton(skeletonize(BW).astype(bool), 5)
-    sc = np.argwhere(sk); thr = np.percentile(sc[:, 0], 20)
-    top = sc[sc[:, 0] <= thr]; base = top[np.argmax(edt[top[:,0], top[:,1], top[:,2]])]
-    segs, prim, vox, _, _ = decompose_root_system(sk, base, list(VOXEL), dist_map=edt, min_seg_len_mm=2.0)
-    kept, _, _ = decontaminate(segs, vox, VOXEL, base=base, drop_orphans=True)
-    base2, hypo, gain, _ = collar_and_hypocotyl(sk, edt, kept, base, VOXEL)
-    roots = [s for s in kept if s['seg_id'] not in hypo]
-    roots, _ = keep_base_component(roots, base)
-    skv = np.vstack([s['coords'] for s in roots])
-    return compute_all_traits(roots, np.vstack([base2, prim]), base2, BW, edt, VOXEL, skv)
+    """Run the full pipeline (run_pipeline.analyse_mask) with the default settings."""
+    import run_pipeline as rp
+    ctx = dict(voxel_size=tuple(VOXEL), prune_vox=5, min_seg_len_mm=2.0, bc_min=3, lin_max=0.7,
+               len_max=15, drop_orphans=True, dens_max=35, dens_len_max=6.0, rescue_min_mm=5.0)
+    return rp.analyse_mask(V.astype(bool), ctx)['T']
 
 
 def main():

@@ -112,7 +112,11 @@ def root_mask(BW, all_segments, root_segments, primary_path, voxel_size, chunk=5
     segments of the decomposition; it is kept when that skeleton voxel belongs to the
     cleaned roots (or to the primary path). Material attached to the hypocotyl, to
     removed sheets or to orphan fragments is therefore excluded, so that volume and
-    surface describe the same root system as the skeleton traits."""
+    surface describe the same root system as the skeleton traits. Mask components
+    that are not connected to the cleaned roots (isolated fragments, which are not
+    part of the skeleton tree) are excluded first, so that their voxels cannot be
+    assigned to a distant root."""
+    from scipy import ndimage
     vs = np.asarray(voxel_size, float)
     ref = [s['coords'] for s in all_segments]
     flag = [np.zeros(len(s['coords']), bool) for s in all_segments]
@@ -129,7 +133,11 @@ def root_mask(BW, all_segments, root_segments, primary_path, voxel_size, chunk=5
     uflag = np.zeros(len(uk), bool); np.logical_or.at(uflag, inv, flag)
     uvox = np.column_stack(np.unravel_index(uk, BW.shape))
     tree = cKDTree(uvox * vs)
-    fg = np.argwhere(BW)
+    lab, _ = ndimage.label(BW, structure=np.ones((3, 3, 3), bool))
+    kept_vox = uvox[uflag]
+    keep_lab = np.unique(lab[kept_vox[:, 0], kept_vox[:, 1], kept_vox[:, 2]])
+    keep_lab = keep_lab[keep_lab > 0]
+    fg = np.argwhere(np.isin(lab, keep_lab))
     out = np.zeros_like(BW, dtype=bool)
     for i in range(0, len(fg), chunk):
         F = fg[i:i + chunk]
