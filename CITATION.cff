@@ -2,9 +2,9 @@ cff-version: 1.2.0
 title: "RootCTrait"
 message: "If you use this software, please cite it as below."
 type: software
-version: 2.0.0
-date-released: 2026-09-28
-doi: 10.5281/zenodo.23019246
+version: 2.4.0
+date-released: 2026-10-04
+doi: 10.5281/zenodo.23148522
 authors:
   - family-names: "Chiasson"
     given-names: "Marc-Antoine"
@@ -21,6 +21,9 @@ keywords:
   - plant genetics
   - GWAS
 identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23148522
+    description: "Archived version 2.4.0"
   - type: doi
     value: 10.5281/zenodo.23019246
     description: "Archived version 2.0.0"
