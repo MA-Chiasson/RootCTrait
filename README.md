@@ -21,6 +21,7 @@ of samples), each in its own folder, and writes one Excel table per batch.
 - [Processing overview](#processing-overview)
 - [Expected input](#expected-input)
 - [Installation](#installation)
+- [Containers (Docker, Apptainer)](#containers-docker-apptainer)
 - [Quick start](#quick-start)
 - [The desktop app (RootCTraitV3)](#the-desktop-app-rootctraitv3)
 - [The command line](#the-command-line)
@@ -69,7 +70,9 @@ For each sample:
    order 2 = laterals, etc.).
 5. **Decontaminate**: remove the surface layers (sheet rule: parallel, sheet-like
    and short segments; dense rule: short segments whose surrounding skeleton is a
-   dense mesh), then the fragments left detached. Detached fragments that look like
+   dense mesh; both rules apply only to segments whose own skeleton is dense, so
+   that a root running along or out of a layer is kept), then the fragments left
+   detached. Detached fragments that look like
    roots (at least 5 mm long and not dense) are rescued: they are joined back to
    the system by the shortest skeleton path through the removed layer, and the
    ordered tree is rebuilt on the cleaned skeleton, so that rescued roots recover a
@@ -146,6 +149,48 @@ with standard Python, and installs `tkinterdnd2` on first launch for drag-and-dr
 
 ---
 
+## Containers (Docker, Apptainer)
+
+A container fixes the Python version and every dependency, so that the same image
+gives the same results on a laptop and on a computing cluster.
+
+**Docker** (from the repository root):
+
+```bash
+docker build -t rootctrait:2.4.0 .
+# the current folder holds params.txt, the data folder and receives results/
+docker run --rm -v "$PWD":/work rootctrait:2.4.0
+docker run --rm -v "$PWD":/work rootctrait:2.4.0 python -m tools.qc_rank --results /work/results
+```
+
+**Apptainer** (Singularity), for clusters where Docker is not available, such as
+those of the Digital Research Alliance of Canada. Build the image where Apptainer
+can build (your own Linux machine, WSL, or a cluster that allows it), then copy the
+`.sif` file to the cluster:
+
+```bash
+apptainer build rootctrait.sif rootctrait.def
+# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.4.0
+```
+
+Example Slurm job, run from the project folder on the cluster:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=rootctrait
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=12:00:00
+module load apptainer
+# PARALLEL in params.txt should match --cpus-per-task
+apptainer run --bind "$PWD" rootctrait.sif
+```
+
+Inside the container, `params.txt` is read from the current folder, and
+`DATA_ROOT` and `RESULTS_ROOT` are relative to it.
+
+---
+
 ## Quick start
 
 ### With the desktop app
@@ -219,6 +264,7 @@ Fields marked `*` are required. The one you must set is the **output folder
 | Timeout per sample (s)       | per-sample time limit                               |
 | Drop orphan fragments        | remove detached fragments (on/off)                  |
 | Save 3D figures              | write the interactive HTML figures (on/off)         |
+| Export RSML files            | write one RSML file per sample (on/off)             |
 
 You can save the current settings as a named **parameter set** and reload it
 later (the output folder is deliberately not stored in a preset, since it changes
@@ -234,8 +280,10 @@ short description.
 - **Merge batches**: merges the trait tables of all batches into one combined file.
 - **Extract checkpoints**: rebuilds trait tables straight from the
   `checkpoint_traits.jsonl` checkpoints, without rerunning the analysis.
-- **Figure report**: builds an HTML report of the interactive 3D Plotly figures,
-  sorted by batch and in numerical order, for visual validation.
+- **Figure report**: ranks the samples by their quality control values
+  (`qc_ranking.csv`, see [Output files](#output-files)) and builds an HTML report of
+  the interactive 3D Plotly figures, by batch, most suspect samples first, for
+  visual validation.
 - **Delete checkpoints**: deletes the `checkpoint_traits.jsonl` checkpoints of a
   results folder to start over; progress is reset to 0 and the analysis restarts from the beginning.
 
@@ -272,11 +320,12 @@ All settings live in `params.txt`. Keys are case-insensitive. Lines starting wit
 | `BC_MIN`        | `3`            | decontamination: min parallel neighbours for a sheet       |
 | `LIN_MAX`       | `0.7`          | decontamination: max linearity for a sheet                 |
 | `LEN_MAX`       | `15`           | decontamination: max length for a sheet (mm)               |
-| `DENS_MAX`      | `35`           | dense rule: skeleton voxels within 2 mm (0 disables)        |
+| `DENS_MAX`      | `35`           | skeleton voxels within 2 mm above which a segment is dense; both rules remove dense segments only (0 disables) |
 | `DENS_LEN_MAX`  | `6`            | dense rule: max segment length (mm)                        |
 | `RESCUE_MIN_MM` | `5`            | min length of a detached fragment to rescue (mm, 0 = off)  |
 | `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
 | `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
+| `EXPORT_RSML`   | `1`            | write one RSML file per sample (1/0)                       |
 | `TIMEOUT`       | `1800`         | per-sample time limit (seconds)                            |
 | `PARALLEL`      | `1`            | number of samples processed concurrently (1 = serial)      |
 
@@ -425,6 +474,7 @@ The same utilities exposed in the app's Tools tab can run standalone:
 python -m tools.figure_report               # writes results/figure_report.html
 python -m tools.merge_batches --format both # merges all batch tables into one file
 python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
+python -m tools.qc_rank                     # ranks the samples for review (results/qc_ranking.csv)
 ```
 
 ### Example 7: sensitivity of the traits to the thresholds
@@ -449,8 +499,11 @@ For each batch, in `results/<batch>/`:
 - **`traits_<batch>.xlsx`**: trait table, one row per sample (lengths in cm,
   diameters in mm, volumes in cm3, angles in degrees). Columns `n_raw`
   (segments before cleaning), `n_removed` and `%removed` report the
-  decontamination, and `pivot_return` (mm) the upward return of the pivot after
-  its deepest point (0 when the deepest point is the tip). Tables and checkpoints
+  decontamination. Quality control columns follow: `pivot_return` (mm), the upward
+  return of the pivot after its deepest point (0 when the deepest point is the tip);
+  `n_rescued`, the number of detached roots rescued; `collar_raise` (mm), how far
+  the collar was raised; `hypocotyl` (mm), the length of the excluded hypocotyl;
+  and `time` (s), the processing time of the sample. Tables and checkpoints
   written by versions before 2.1.0, which
   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
   `NRL_moyen_5_15`), are still read and renamed by the tools.
@@ -459,6 +512,14 @@ For each batch, in `results/<batch>/`:
   in the traits but flagged for checking (brown, dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
   excluded), detached orphans (grey), original collar (green), raised collar
   (purple diamond).
+- **`rsml/<sample>.rsml`**: the cleaned root tree in the Root System Markup
+  Language (Lobet et al., 2015, Plant Physiology 167, 617-627), readable by other
+  root software (for example the OpenAlea `rsml` package, SmartRoot or archiDART).
+  One plant per file: the primary root (from the raised collar to its tip) and its
+  laterals nested in their parent root, each with its polyline, a diameter function
+  (mm, at every point) and its branching order. Coordinates are in mm in the frame
+  of the input volume: x and y are the horizontal axes X and Z, z is the depth
+  (downward). The hypocotyl and the removed material are not exported.
 - **`checkpoint_traits.jsonl`**: resume state (delete to recompute).
 - **`params_used.json`**: the exact settings used for this batch (voxel, pruning,
   decontamination thresholds, timeout, parallel, orphan threshold, data folder,
@@ -467,6 +528,17 @@ For each batch, in `results/<batch>/`:
 - **`failures.jsonl`**: one line per sample that timed out or errored, with the
   name, the failure type, the message and a timestamp. Empty or absent when
   everything succeeds; a quick way to see what needs attention.
+
+In `results/`, after `python -m tools.qc_rank` (or the Figure report of the app):
+
+- **`qc_ranking.csv`**: the samples of each batch ranked for visual review. Explicit
+  rules flag a sample when its pivot return exceeds 3 mm, or when one of its quality
+  control values (`%removed`, `n_rescued`, `collar_raise`, `hypocotyl`, the ratio
+  LRP/PM) is high, or one of LRP, PM, TRL, NRL, ANGO2, DRP is unusual, for its batch
+  (more than 3 robust standard deviations from the batch median; `--k` changes the
+  threshold). Samples are sorted by number of flags, and the figure report follows
+  this order and prints the flags on each card. The ranking only orders the review;
+  no trait is changed.
 
 See [`docs/traits.md`](docs/traits.md) for the full trait list with definitions
 and units.
@@ -560,12 +632,14 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── decontamination.py          Surface layers, orphan fragments, rescue
 │   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
 │   ├── root_traits_full.py         Full trait set
+│   ├── rsml_export.py              Export of the root tree in RSML
 │   └── legacy.py                   Former column names (reads files from versions < 2.1.0)
 ├── tools/                      Post-processing utilities (also in the app's Tools tab)
 │   ├── __init__.py
 │   ├── merge_batches.py            Merge all batch tables into one file
 │   ├── extract_checkpoint.py       Rebuild tables from checkpoints
 │   ├── figure_report.py            HTML index to review 3D figures (QC)
+│   ├── qc_rank.py                  Ranking of the samples for visual review
 │   └── sensitivity.py              One-at-a-time sensitivity analysis of the thresholds
 ├── docs/traits.md              Trait reference
 ├── docs/limitations.md         Known limitations
@@ -574,16 +648,19 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 ├── example/roots/sample_S1.npy Synthetic example dataset (versioned)
 ├── tests/test_invariants.py    Invariant tests (pytest)
 ├── tests/test_components.py    Unit tests: connectivity, pivot hook, root mask
+├── tests/test_rsml_qc.py       Unit tests: RSML export, QC ranking
 ├── validation/validate_phantoms.py  Accuracy check on known-geometry phantoms
 ├── validation/phantom_results.csv   Results of that check
 ├── validation/realistic_phantoms.py Phantoms at four levels of difficulty (shape,
 │                                    contacts, real surface layers, hypocotyl)
 ├── validation/data/                 Surface layers cut from a real scan, used by it
 ├── pyproject.toml              Package metadata (pip install -e .)
+├── Dockerfile                  Docker image
+├── rootctrait.def              Apptainer (Singularity) definition, for clusters
 ├── requirements.txt
 ├── CITATION.cff                Citation metadata
 ├── data/                       Input volumes (not versioned)
-└── results/                    Output: Excel, figures, checkpoint, params_used.json, failures.jsonl
+└── results/                    Output: Excel, figures, RSML, checkpoint, params_used.json, failures.jsonl
 ```
 
 Run `run_pipeline.py` or `rootctrait_app.py` from the root folder (or

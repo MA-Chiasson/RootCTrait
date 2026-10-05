@@ -6,8 +6,9 @@ The pipeline appends one JSON line per processed sample to a checkpoint file
 (checkpoint_traits.jsonl) as it goes. If you stop a run, this tool reads whatever
 has been written so far and produces a trait table of the samples already done.
 
-Each checkpoint line holds: name, n_raw, n_removed, and T (the 38 traits). The output
-mirrors the normal table: ID, n_raw, n_removed, %removed, then the traits.
+Each checkpoint line holds: name, n_raw, n_removed, the processing time and T (the 38
+traits and the quality control values). The output mirrors the normal table: ID, n_raw,
+n_removed, %removed, the quality control columns, then the traits.
 Checkpoints written by versions before 2.1.0 (French key names) are read too.
 
 Run:  python extract_checkpoint.py                     (scan results/<batch>/)
@@ -21,6 +22,10 @@ import glob
 import json
 import re
 import pandas as pd
+
+# quality control columns (table header, key in the checkpoint), as in run_pipeline.QC_COLS
+QC = [("pivot_return", "PIVOT_RETURN"), ("n_rescued", "N_RESCUED"), ("collar_raise", "COLLAR_RAISE"),
+      ("hypocotyl", "HYPOCOTYL_LEN"), ("time", "SECONDS")]
 
 import os as _os, sys as _sys
 # tools/ lives under the project root; resolve the root and make it importable
@@ -37,7 +42,7 @@ def load_factors():
     src_path = os.path.join(PROJECT_ROOT, "run_pipeline.py")
     try:
         src = open(src_path, encoding="utf-8", errors="ignore").read()
-        block = re.search(r"COLS\s*=\s*\[(.*?)\]", src, re.S).group(1)
+        block = re.search(r"^COLS\s*=\s*\[(.*?)\]", src, re.S | re.M).group(1)
         for name, fac in re.findall(r"\(\s*'([^']+)'\s*,\s*'[^']*'\s*,\s*([0-9.]+)\)", block):
             factors[name] = float(fac); order.append(name)
     except Exception as e:
@@ -81,8 +86,9 @@ def read_checkpoint(path):
                    "n_removed": nr,
                    "%removed": (round(100 * nr / nb, 1) if nb else 0)}
             T = dict(d.get("T", {}))
-            pr = T.pop("PIVOT_RETURN", None)
-            row["pivot_return"] = round(pr, 2) if isinstance(pr, (int, float)) else None
+            for col, key in QC:
+                v = d.get("seconds") if key == "SECONDS" else T.pop(key, None)
+                row[col] = round(v, 2) if isinstance(v, (int, float)) else None
             for k, v in T.items():
                 row[k] = (v * FACTORS[k]) if (k in FACTORS and isinstance(v, (int, float))) else v
             rows.append(row)
@@ -91,7 +97,7 @@ def read_checkpoint(path):
     if not rows:
         return None
     df = pd.DataFrame(rows)
-    lead = [c for c in ["ID", "n_raw", "n_removed", "%removed", "pivot_return"] if c in df.columns]
+    lead = [c for c in ["ID", "n_raw", "n_removed", "%removed"] + [c_ for c_, _ in QC] if c in df.columns]
     ordered = [c for c in COL_ORDER if c in df.columns]              # same order as normal output
     rest = [c for c in df.columns if c not in lead + ordered]
     return df[lead + ordered + rest]

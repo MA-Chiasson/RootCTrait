@@ -97,7 +97,8 @@ def main():
     # prudent union: concat aligns on the union of columns, missing -> NaN
     merged = pd.concat(frames, ignore_index=True, sort=False)
     # keep a stable, readable column order: batch, ID, then the rest as first seen
-    lead = [c for c in ["batch", "ID", "n_raw", "n_removed", "%removed"] if c in merged.columns]
+    lead = [c for c in ["batch", "ID", "n_raw", "n_removed", "%removed", "pivot_return", "n_rescued",
+                          "collar_raise", "hypocotyl", "time"] if c in merged.columns]
     rest = [c for c in merged.columns if c not in lead]
     merged = merged[lead + rest]
 

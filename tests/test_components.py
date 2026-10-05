@@ -75,3 +75,21 @@ def test_reattach_joins_rescued_fragment_through_removed_layer():
     assert [s['seg_id'] for s in joined] == [2] and [s['seg_id'] for s in not_joined] == [3]
     path = set(map(tuple, B))
     assert (9, 6, 5) in path and (9, 10, 5) in path or (10, 10, 5) in path
+
+
+def test_sparse_root_beside_a_layer_is_kept():
+    from rootctrait.decontamination import decontaminate
+    # dense layer: 12 parallel rungs (along Z) of 30 voxels (6 mm), 1 voxel apart in X
+    segs = [_seg(i, [[10, 10 + i, z] for z in range(30)]) for i in range(12)]
+    for s in segs:
+        s['length_mm'] = 29 * 0.2
+    # a root passing 3 mm beside the layer, parallel to the rungs: sheet like
+    # neighbourhood, but its own skeleton is a single line
+    root = _seg(12, [[10, 30, z] for z in range(30)])
+    root['length_mm'] = 29 * 0.2
+    segs.append(root)
+    skv = np.vstack([s['coords'] for s in segs])
+    kept, removed, f = decontaminate(segs, skv, VS, base=None, drop_orphans=False)
+    ids = {s['seg_id'] for s in removed}
+    assert 12 not in ids and len(ids) >= 10
+    assert f['bc'][12] >= 3 and f['lin'][12] < 0.7      # the sheet rule alone would remove it

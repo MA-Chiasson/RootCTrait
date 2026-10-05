@@ -1,0 +1,41 @@
+# Apptainer (Singularity) definition for RootCTrait, for computing clusters such as
+# those of the Digital Research Alliance of Canada, where Docker is not available.
+#
+# Build (from the repository root, on a machine where Apptainer can build images):
+#   apptainer build rootctrait.sif rootctrait.def
+# or convert the Docker image:
+#   apptainer build rootctrait.sif docker-daemon://rootctrait:2.4.0
+# Run (the current folder must hold params.txt):
+#   apptainer run rootctrait.sif
+#   apptainer exec rootctrait.sif python -m tools.qc_rank --results results
+Bootstrap: docker
+From: python:3.11-slim
+
+%labels
+    Title RootCTrait
+    Version 2.4.0
+    Source https://github.com/MA-Chiasson/RootCTrait
+
+%files
+    pyproject.toml /opt/rootctrait/pyproject.toml
+    README.md /opt/rootctrait/README.md
+    LICENSE /opt/rootctrait/LICENSE
+    requirements.txt /opt/rootctrait/requirements.txt
+    rootctrait /opt/rootctrait/rootctrait
+    run_pipeline.py /opt/rootctrait/run_pipeline.py
+    pipeline_api.py /opt/rootctrait/pipeline_api.py
+    tools /opt/rootctrait/tools
+    validation/validate_phantoms.py /opt/rootctrait/validation/validate_phantoms.py
+    validation/realistic_phantoms.py /opt/rootctrait/validation/realistic_phantoms.py
+    validation/data /opt/rootctrait/validation/data
+    example /opt/rootctrait/example
+
+%post
+    pip install --no-cache-dir "/opt/rootctrait[figures,formats]"
+
+%environment
+    export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MPLBACKEND=Agg
+    export PYTHONPATH=/opt/rootctrait
+
+%runscript
+    exec python /opt/rootctrait/run_pipeline.py "$@"

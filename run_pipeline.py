@@ -5,7 +5,7 @@ DECONTAMINATION -> trait EXTRACTION -> one Excel table per batch.
 
 Expected folder layout (relative to the script folder):
     data/<batch>/      the masks of this batch
-    results/<batch>/   output: traits_<batch>.xlsx, figures/, checkpoint
+    results/<batch>/   output: traits_<batch>.xlsx, figures/, rsml/, checkpoint
 
 Config: params.txt (same folder). The processing settings (voxel, pruning,
 decontamination) are SHARED by all batches, which keeps results comparable for
@@ -38,6 +38,8 @@ from rootctrait.root_traits_full import compute_all_traits, split_pivot_return, 
 from rootctrait.detection_hypocotyle import collar_and_hypocotyl
 from rootctrait.io_volume import load_volume
 from rootctrait.legacy import upgrade_record
+from rootctrait.rsml_export import write_rsml
+from rootctrait import __version__
 
 # ============================ CONFIGURATION ============================
 
@@ -85,6 +87,8 @@ DENS_MAX = float(PARAMS.get('DENS_MAX', '35'))
 DENS_LEN_MAX = float(PARAMS.get('DENS_LEN_MAX', '6'))
 RESCUE_MIN_MM = float(PARAMS.get('RESCUE_MIN_MM', '5'))
 SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
+# One RSML file per sample (cleaned root tree, Root System Markup Language).
+EXPORT_RSML = PARAMS.get('EXPORT_RSML', '1').lower() not in ('0', 'false', 'no')
 TIMEOUT = int(PARAMS.get('TIMEOUT', '1800'))
 # Number of samples processed concurrently. 1 = current serial behaviour (default).
 PARALLEL = int(PARAMS.get('PARALLEL', '1'))
@@ -97,6 +101,11 @@ else:
     requested = [b.strip() for b in _batch.split(',') if b.strip()]
     ACTIVE_BATCHES = [b for b in BATCH_DEFS if b['name'] in requested]
 # ======================================================================
+
+# Quality control columns written before the traits: (header, unit, key in T).
+QC_COLS = [('pivot_return', 'mm', 'PIVOT_RETURN'), ('n_rescued', 'count', 'N_RESCUED'),
+           ('collar_raise', 'mm', 'COLLAR_RAISE'), ('hypocotyl', 'mm', 'HYPOCOTYL_LEN'),
+           ('time', 's', 'SECONDS')]
 
 COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm', .1),
         ('NRL', 'count', 1), ('NRL_short_<5', 'count', 1), ('NRL_medium_5_15', 'count', 1),
@@ -262,21 +271,40 @@ def process(name, ctx):
         make_figure(name, R['roots'], R['removed'], prim_down, ctx['fig_dir'], voxel_size,
                     hypocotyl=R['hypocotyl'], orphans=R['orphans'], base=R['base'], base2=R['base2'],
                     pivot_hook=prim_up)
+    if ctx.get('export_rsml') and ctx.get('rsml_dir'):
+        os.makedirs(ctx['rsml_dir'], exist_ok=True)
+        write_rsml(os.path.join(ctx['rsml_dir'], f'{name}.rsml'), name, R['roots'], R['prim2'], R['edt'],
+                   voxel_size, offset=[s_.start for s_ in R['crop']], software=f'RootCTrait {__version__}')
     return R['n_raw'], R['n_removed'], R['T']
 
 
-def analyse_mask(BW, ctx):
-    """Full processing of one binary mask (cropping, skeleton, decomposition,
-    decontamination, collar and hypocotyl, traits). Returns a dict with the traits
-    and the intermediate results (used by the figures and the validation scripts)."""
-    voxel_size = tuple(ctx['voxel_size'])
+def prepare_mask(BW, voxel_size):
+    """Steps that depend only on the mask: cropping, distance map and raw skeleton.
+    They take most of the processing time, so a caller that analyses the same mask
+    several times (tools/sensitivity.py) computes them once and passes the result to
+    analyse_mask(..., pre=...). The pruned skeletons are cached per pruning length."""
     c = np.argwhere(BW)
     mn = c.min(0); mx = c.max(0); m = 6
     crop = tuple(slice(max(0, mn[i] - m), mx[i] + m) for i in range(3))
-    BW = BW[crop]
-    edt = ndimage.distance_transform_edt(BW, sampling=voxel_size)
-    sk = skeletonize(BW).astype(bool)
-    sk = prune_skeleton(sk, min_branch_length_vox=ctx['prune_vox'])
+    BWc = BW[crop]
+    edt = ndimage.distance_transform_edt(BWc, sampling=tuple(voxel_size))
+    return dict(crop=crop, BW=BWc, edt=edt, sk_raw=skeletonize(BWc).astype(bool), pruned={})
+
+
+def analyse_mask(BW, ctx, pre=None):
+    """Full processing of one binary mask (cropping, skeleton, decomposition,
+    decontamination, collar and hypocotyl, traits). Returns a dict with the traits
+    and the intermediate results (used by the figures and the validation scripts).
+    pre: optional result of prepare_mask(BW) for the same mask (same results, faster
+    when the mask is analysed several times)."""
+    voxel_size = tuple(ctx['voxel_size'])
+    if pre is None:
+        pre = prepare_mask(BW, voxel_size)
+    crop, BW, edt = pre['crop'], pre['BW'], pre['edt']
+    pv = ctx['prune_vox']
+    if pv not in pre['pruned']:
+        pre['pruned'][pv] = prune_skeleton(pre['sk_raw'].copy(), min_branch_length_vox=pv)
+    sk = pre['pruned'][pv].copy()
     base = detect_base(sk, edt, voxel_size)
     decomp_kw = dict(dist_map=edt, min_seg_len_mm=ctx['min_seg_len_mm'], crown_exclude_mm=0.0)
     segs, prim, voxels, border, bnode = decompose_root_system(sk, base, list(voxel_size), **decomp_kw)
@@ -333,22 +361,27 @@ def analyse_mask(BW, ctx):
     BW_roots = root_mask(BW, mask_segs, roots, prim2, voxel_size)
     # base2 = reference collar for the traits (depths, LRP, angles).
     T = compute_all_traits(roots, prim2, base2, BW_roots, edt, voxel_size, skv_clean)
-    return dict(T=T, n_raw=n_raw, n_removed=n_ret, n_rescued=n_rescued, crop=crop,
+    # Quality control values, written next to the traits (not traits themselves).
+    vs_ = np.asarray(voxel_size, float)
+    T['N_RESCUED'] = int(n_rescued)
+    T['COLLAR_RAISE'] = float(gain)
+    T['HYPOCOTYL_LEN'] = float(sum(s_['length_mm'] for s_ in hypocotyl))
+    return dict(T=T, edt=edt, n_raw=n_raw, n_removed=n_ret, n_rescued=n_rescued, crop=crop,
                 base=base, base2=base2, prim2=prim2, segs=segs, kept=kept, removed=removed_segs,
                 roots=roots, hypocotyl=hypocotyl, orphans=orphans, feats=feats, gain=gain)
 
 
 def write_excel(results, out_xlsx, title):
     wb = Workbook(); ws = wb.active; ws.title = "Traits"; F = "Arial"
-    ncol = len(COLS) + 5
+    ncol = len(COLS) + len(QC_COLS) + 4
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
     ws.cell(1, 1, title)
     ws.cell(1, 1).font = Font(name=F, bold=True, size=12, color="FFFFFF")
     ws.cell(1, 1).fill = PatternFill("solid", start_color="1F3864")
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 22
-    hdr = ["ID", "n_raw", "n_removed", "%removed", "pivot_return"] + [c[0] for c in COLS]
-    uni = ["", "", "", "", "mm"] + [c[1] for c in COLS]
+    hdr = ["ID", "n_raw", "n_removed", "%removed"] + [c[0] for c in QC_COLS] + [c[0] for c in COLS]
+    uni = ["", "", "", ""] + [c[1] for c in QC_COLS] + [c[1] for c in COLS]
     for j, h in enumerate(hdr, 1):
         cc = ws.cell(2, j, h); cc.font = Font(name=F, bold=True, color="FFFFFF")
         cc.fill = PatternFill("solid", start_color="2E5496")
@@ -359,16 +392,17 @@ def write_excel(results, out_xlsx, title):
         cc.alignment = Alignment(horizontal="center")
     thin = Side(style="thin", color="E0E0E0"); bd = Border(left=thin, right=thin, top=thin, bottom=thin)
     r = 4
-    for name, nb, nr, T in results:
+    for name, nb, nr, T, sec in results:
         band = "F5F8FC" if r % 2 == 0 else "FFFFFF"
-        pr = T.get('PIVOT_RETURN') if T is not None else None
-        vals = [name, nb, nr, (round(100 * nr / nb, 1) if nb else None),
-                (round(float(pr), 2) if isinstance(pr, (int, float)) else None)]
+        vals = [name, nb, nr, (round(100 * nr / nb, 1) if nb else None)]
+        for _, _, key in QC_COLS:
+            v = sec if key == 'SECONDS' else (T.get(key) if T is not None else None)
+            vals.append(round(float(v), 2) if isinstance(v, (int, float)) else None)
         for j, v in enumerate(vals, 1):
             cc = ws.cell(r, j, v); cc.border = bd; cc.fill = PatternFill("solid", start_color=band)
             if j == 1:
                 cc.font = Font(name=F, bold=True)
-        for j, (key, unit, fac) in enumerate(COLS, 6):
+        for j, (key, unit, fac) in enumerate(COLS, 5 + len(QC_COLS)):
             tv = T.get(key) if T is not None else None
             cc = ws.cell(r, j); cc.border = bd; cc.fill = PatternFill("solid", start_color=band)
             if tv is None or (isinstance(tv, float) and not math.isfinite(tv)):
@@ -378,10 +412,12 @@ def write_excel(results, out_xlsx, title):
                 cc.value = round(v, 3 if abs(v) < 100 else 1)
                 cc.number_format = '0.000' if abs(v) < 100 else '0.0'
         r += 1
-    ws.freeze_panes = "F4"
-    for col, w in (('A', 8), ('B', 8), ('C', 9), ('D', 8), ('E', 9)):
+    ws.freeze_panes = get_column_letter(5 + len(QC_COLS)) + "4"
+    for col, w in (('A', 8), ('B', 8), ('C', 9), ('D', 8)):
         ws.column_dimensions[col].width = w
-    for j in range(6, ncol + 1):
+    for j in range(5, 5 + len(QC_COLS)):
+        ws.column_dimensions[get_column_letter(j)].width = 11
+    for j in range(5 + len(QC_COLS), ncol + 1):
         ws.column_dimensions[get_column_letter(j)].width = 10
     wb.save(out_xlsx)
 
@@ -473,6 +509,7 @@ def _effective_params():
         'dens_len_max': DENS_LEN_MAX,
         'rescue_min_mm': RESCUE_MIN_MM,
         'save_figures': SAVE_FIGURES,
+        'export_rsml': EXPORT_RSML,
     }
 
 
@@ -491,7 +528,7 @@ def _handle_result(name, status, payload, t0, store, checkpoint, failures_path):
     dt = time.time() - t0
     if status == 'ok':
         nb, nr, T = payload
-        rec = {'name': name, 'n_raw': nb, 'n_removed': nr, 'T': _clean_T(T)}
+        rec = {'name': name, 'n_raw': nb, 'n_removed': nr, 'T': _clean_T(T), 'seconds': round(dt, 1)}
         store[name] = rec
         append_store(checkpoint, rec)
         lrp = T.get('LRP') if isinstance(T, dict) else None
@@ -510,7 +547,7 @@ def _handle_result(name, status, payload, t0, store, checkpoint, failures_path):
         _append_failure(failures_path, {'name': name, 'status': 'error',
                                         'msg': str(payload),
                                         'at': time.strftime('%Y-%m-%d %H:%M:%S')})
-        print(f"  {name:6s} ERREUR {payload} (sera reessaye)", flush=True)
+        print(f"  {name:6s} ERROR {payload} (will be retried)", flush=True)
 
 
 def _run_parallel(todo, ctx, store, checkpoint, failures_path, nworkers, should_stop):
@@ -578,10 +615,11 @@ def process_batch(batch, should_stop=None):
     checkpoint = os.path.join(res_dir, 'checkpoint_traits.jsonl')
     failures_path = os.path.join(res_dir, 'failures.jsonl')
     fig_dir = os.path.join(res_dir, 'figures')
+    rsml_dir = os.path.join(res_dir, 'rsml')
 
     eff = _effective_params()
     ctx = {'data_dir': data_dir, 'pattern': batch['pattern'],
-           'axis_order': batch['axis_order'], 'fig_dir': fig_dir,
+           'axis_order': batch['axis_order'], 'fig_dir': fig_dir, 'rsml_dir': rsml_dir,
            'var_name': batch.get('var_name'), **eff}
 
     if not os.path.isdir(data_dir):
@@ -627,7 +665,8 @@ def process_batch(batch, should_stop=None):
             _handle_result(name, status, payload, t0, store, checkpoint, failures_path)
     else:
         _run_parallel(todo, ctx, store, checkpoint, failures_path, nworkers, should_stop)
-    results = [(s, store[s]['n_raw'], store[s]['n_removed'], store[s]['T']) for s in samples if s in store]
+    results = [(s, store[s]['n_raw'], store[s]['n_removed'], store[s]['T'], store[s].get('seconds'))
+               for s in samples if s in store]
     title = f"Root traits - {bname} - after decontamination (cleaned skeleton)"
     write_excel(results, out_xlsx, title)
     ok = len(results); fail = len(samples) - ok

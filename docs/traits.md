@@ -1,7 +1,7 @@
 # RootCTrait trait reference
 
-One row per sample is written to the output Excel table: 38 traits plus three
-bookkeeping columns. Lengths are in cm, diameters in mm, volumes in cm3, angles in
+One row per sample is written to the output Excel table: 38 traits plus bookkeeping
+and quality control columns. Lengths are in cm, diameters in mm, volumes in cm3, angles in
 degrees; ratios and counts are dimensionless. Unless stated otherwise, traits are
 computed on the cleaned root system (hypocotyl, sheet artifacts and detached
 fragments excluded), and depths are measured from the raised collar.
@@ -18,6 +18,10 @@ contributes one segment per order.
 | `n_removed` | number of segments removed by decontamination                  |
 | `%removed`  | fraction removed (a scan-quality indicator; use as covariate)  |
 | `pivot_return` | upward return of the pivot after its deepest point, mm (quality control; check samples above 3 mm) |
+| `n_rescued` | number of detached roots rescued and joined back by decontamination |
+| `collar_raise` | how far the collar was raised above the thickest point, mm |
+| `hypocotyl` | length of the excluded hypocotyl skeleton, mm (0 when none was detected) |
+| `time` | processing time of the sample, s |
 
 ## Length
 

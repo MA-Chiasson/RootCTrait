@@ -12,7 +12,9 @@ Review features:
     (localStorage);
   - free note field per sample;
   - "Export CSV" button to retrieve all the judgments at the end;
-  - progress counter per batch.
+  - progress counter per batch;
+  - when results/qc_ranking.csv exists (python -m tools.qc_rank), the figures of
+    each batch are ordered by that ranking and the flags are shown on each card.
 
 Run from the project root: python -m tools.figure_report
 It scans results/<batch>/figures/*.html and writes results/figure_report.html.
@@ -67,8 +69,14 @@ def build(batches):
     order = order_batches(batches)
     total = sum(len(v) for v in batches.values())
 
-    # donnees injectees en JS
-    data = {b: [{"name": n, "src": s} for n, s in batches[b]] for b in order}
+    # data injected in JS; samples ordered by the QC ranking when it exists
+    from tools.qc_rank import load_ranking
+    qc = load_ranking(RESULTS_ROOT)
+    data = {}
+    for b in order:
+        rk = qc.get(b, {})
+        items = sorted(batches[b], key=lambda t: rk.get(t[0], (10 ** 9, ''))[0]) if rk else batches[b]
+        data[b] = [{"name": n, "src": s, "flags": rk.get(n, (0, ''))[1]} for n, s in items]
 
     html = []
     html.append("""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
@@ -93,6 +101,7 @@ def build(batches):
   .carte { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
            overflow: hidden; display: flex; flex-direction: column; }
   .carte h3 { margin: 0; padding: 8px 12px; font-size: 14px; background: #eef2f9; }
+  .flags { font-weight: normal; font-size: 12px; color: #b03a2e; margin-left: 8px; }
   .cadre { position: relative; height: 640px; background: #fafafa; border-top: 1px solid #eee;
            border-bottom: 1px solid #eee; }
   .cadre iframe { width: 100%; height: 100%; border: 0; }
@@ -161,7 +170,7 @@ function render() {{
     carte.className = "carte";
     if (jug) carte.setAttribute("data-jug", jug);
     carte.innerHTML =
-      '<h3>' + it.name + '</h3>' +
+      '<h3>' + it.name + (it.flags ? '<span class="flags">' + it.flags + '</span>' : '') + '</h3>' +
       '<div class="cadre"><div class="placeholder" onclick="loadFig(this,\\'' + it.src + '\\')">' +
         '<div>&#128065; click to display</div><div style="font-size:11px;opacity:.7">3D figure</div>' +
       '</div></div>' +
@@ -243,7 +252,10 @@ def generate(results_root=None):
 
 
 def main():
-    if generate() is not None:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--results', default=None, help='results folder (default: results/ of the project)')
+    if generate(ap.parse_args().results) is not None:
         print("\nOpen figure_report.html in a browser.")
         print("Figures load on click (nothing is preloaded, no crash).")
 

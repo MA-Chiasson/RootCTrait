@@ -17,13 +17,15 @@ VOXEL=0.39,0.39,0.2
 PRUNE_VOX=5
 ; Segments shorter than this length (mm) are discarded
 MIN_SEG_LEN_MM=2.0
-; Sheet rule: a segment is removed when bc >= BC_MIN, lin < LIN_MAX and length < LEN_MAX (mm)
+; Sheet rule: a segment is removed when bc >= BC_MIN, lin < LIN_MAX, length < LEN_MAX (mm)
+; and its skeleton is dense (see DENS_MAX)
 BC_MIN=3
 LIN_MAX=0.7
 LEN_MAX=15
 ; Dense rule: a segment is also removed when the skeleton around it is dense
 ; (DENS_MAX skeleton voxels or more within 2 mm) and it is shorter than DENS_LEN_MAX (mm).
-; DENS_MAX=0 disables the dense rule.
+; Both rules remove dense segments only, so that sparse lines (roots running along or
+; out of a layer) are kept. DENS_MAX=0 disables the dense rule and this condition.
 DENS_MAX=35
 DENS_LEN_MAX=6
 ; Detached fragments at least RESCUE_MIN_MM long (mm) and not dense are kept as roots
@@ -33,6 +35,8 @@ RESCUE_MIN_MM=5
 DROP_ORPHANS=1
 ; 1 = write one interactive HTML figure per sample (requires plotly)
 SAVE_FIGURES=0
+; 1 = write one RSML file per sample (cleaned root tree, Root System Markup Language)
+EXPORT_RSML=1
 ; Time limit per sample, in seconds
 TIMEOUT=1800
 

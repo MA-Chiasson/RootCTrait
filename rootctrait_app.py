@@ -304,6 +304,7 @@ PARAM_FIELDS = [
     ("RESCUE_MIN_MM","Rescue: min length (mm)",      "float", False),
     ("DROP_ORPHANS", "Drop orphan fragments",        "bool",  False),
     ("SAVE_FIGURES", "Save 3D figures",              "bool",  False),
+    ("EXPORT_RSML",  "Export RSML files",            "bool",  False),
 ]
 REQUIRED = {k for k, _, _, req in PARAM_FIELDS if req}
 PRESET_EXCLUDE = {"RESULTS_ROOT"}
@@ -638,8 +639,9 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
 
         btn_report = ttk.Button(tab_tools, text="🖼 Figure report", command=self.tool_report)
         btn_report.pack(side="left", padx=4)
-        Tooltip(btn_report, "Generates the HTML report of interactive 3D Plotly figures, sorted by "
-                            "batch and in numerical order, for visual validation.")
+        Tooltip(btn_report, "Ranks the samples by their quality control values (qc_ranking.csv) and "
+                            "generates the HTML report of interactive 3D Plotly figures, by batch, "
+                            "most suspect samples first, for visual validation.")
 
         btn_del = ttk.Button(tab_tools, text="🗑 Delete checkpoints", command=self.tool_delete_checkpoints)
         btn_del.pack(side="left", padx=4)
@@ -1096,6 +1098,9 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         from tools import figure_report as grf
         self.log(f"=== Generate figure report ({grf.RESULTS_ROOT}) ===")
         def do(fmt):
+            # rank the samples first, so that the report lists the most suspect first
+            from tools import qc_rank
+            qc_rank.run(grf.RESULTS_ROOT)
             path = grf.generate()                    # uses the project's RESULTS_ROOT
             if path:
                 try:
@@ -1124,7 +1129,8 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
                 for c in df.columns: presence[c] = presence.get(c, 0) + 1
             if not frames: print("Nothing to merge."); return
             merged = pd.concat(frames, ignore_index=True, sort=False)
-            lead = [c for c in ["batch","ID","n_raw","n_removed","%removed"] if c in merged.columns]
+            lead = [c for c in ["batch","ID","n_raw","n_removed","%removed","pivot_return","n_rescued",
+                                "collar_raise","hypocotyl","time"] if c in merged.columns]
             merged = merged[lead + [c for c in merged.columns if c not in lead]]
             base = _os.path.join(d, "merged_traits")
             if fmt in ("xlsx","both"): merged.to_excel(base+".xlsx", index=False); print(f"  -> {base}.xlsx")

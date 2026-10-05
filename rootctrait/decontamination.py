@@ -6,6 +6,7 @@ Two geometric steps, uniform across all samples (GWAS compatible):
      - parallel     : bc >= BC_MIN  (at least BC_MIN parallel, offset neighbors)
      - low linearity: lin < LIN_MAX (sheet-like neighborhood rather than a line)
      - short        : length < LEN_MAX mm
+     - dense        : dens >= DENS_MAX (its own skeleton is a mesh, not a line)
 
    Dense rule: a segment is also removed if the skeleton around it is dense
    (dens >= DENS_MAX voxels within RDENS mm, a mesh rather than a line) and it is
@@ -163,7 +164,11 @@ def decontaminate(segments, skv_full, voxel_size, base=None,
     f = segment_features(segments, skv_full, voxel_size)
     rule_removed = (f['bc'] >= bc_min) & (f['lin'] < lin_max) & (f['length'] < len_max)
     if dens_max is not None and dens_max > 0:
-        rule_removed |= (f['dens'] >= dens_max) & (f['length'] < dens_len_max)
+        # Both rules apply only where the skeleton is dense: a sparse segment is a line,
+        # such as a root running along or out of a layer, even when its neighbourhood
+        # (6 mm) is sheet like.
+        dense = f['dens'] >= dens_max
+        rule_removed = dense & (rule_removed | (f['length'] < dens_len_max))
     kept = [s for s, r in zip(segments, rule_removed) if not r]
     removed = [s for s, r in zip(segments, rule_removed) if r]
     rescued = []

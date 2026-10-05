@@ -16,9 +16,15 @@ Thresholds read from params.txt (PRUNE_VOX, MIN_SEG_LEN_MM, BC_MIN, LIN_MAX,
 LEN_MAX, DENS_MAX, DENS_LEN_MAX, RESCUE_MIN_MM) and thresholds fixed in the code (collar layer, hypocotyl angle, collar
 climb fraction, high branch margin) are all covered.
 
-Run from the project root, for example:
+Batches whose files hold several versions of the mask use the variable recorded in
+RESULTS_ROOT/<batch>/selection_versions.csv (written by retraiter_B2T3.py), so that
+the same mask is analysed as in the trait table.
+
+Run from the project root (not from tools/), for example:
     python -m tools.sensitivity --batch block1_t1 --n 30 --workers 4
     python -m tools.sensitivity --batch block1_t1 --batch block2_t2 --n 20
+Runs are saved as they end (sensitivity_partial.jsonl): rerun the same command to
+resume an interrupted analysis; delete that file to start over.
 Output (in RESULTS_ROOT/sensitivity/):
     sensitivity_traits.csv   one row per sample and variant, all traits
     sensitivity_summary.csv  one row per threshold, variant and trait
@@ -29,6 +35,9 @@ import multiprocessing as mp
 import os
 import random
 import sys
+import time
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -40,6 +49,7 @@ if PROJECT_ROOT not in sys.path:
 import run_pipeline as rp                                    # noqa: E402
 from rootctrait import detection_hypocotyle as dh            # noqa: E402
 from rootctrait import root_traits_full as rtf               # noqa: E402
+from rootctrait.io_volume import load_volume                 # noqa: E402
 
 # threshold -> (default, low, high)
 FILE_PARAMS = {
@@ -74,6 +84,7 @@ def variants():
 def _base_ctx(batch):
     return {'data_dir': os.path.join(rp.DATA_ROOT, batch['name']),
             'pattern': batch['pattern'], 'axis_order': batch['axis_order'],
+            'var_name': batch.get('var_name'),
             'voxel_size': tuple(rp.VOXEL_SIZE), 'prune_vox': rp.PRUNE_VOX,
             'min_seg_len_mm': rp.MIN_SEG_LEN_MM, 'bc_min': rp.BC_MIN,
             'lin_max': rp.LIN_MAX, 'len_max': rp.LEN_MAX,
@@ -82,11 +93,22 @@ def _base_ctx(batch):
             'save_figures': False, 'fig_dir': None}
 
 
-def _run_one(task):
-    """Process one sample with one variant. The code-level thresholds are injected by
-    wrapping the pipeline functions inside this worker only."""
-    batch, sample, (param, side, value) = task
+def _sample_ctx(batch, sample):
     ctx = _base_ctx(batch)
+    # mask variable chosen per sample by a dedicated script (selection_versions.csv)
+    sel = batch.get('selection', {})
+    stem = os.path.splitext(batch['pattern'].format(name=sample))[0]   # file name without .mat
+    var = sel.get(sample, sel.get(stem))
+    if var:
+        ctx['var_name'] = var
+    return ctx
+
+
+def _variant(batch, sample, variant, BW, pre, ctx0):
+    """One variant on a mask already loaded and prepared. The code-level thresholds
+    are injected by wrapping the pipeline functions inside this worker only."""
+    param, side, value = variant
+    ctx = dict(ctx0)
     code = {k: v[0] for k, v in CODE_PARAMS.items()}
     if param in CTX_KEY:
         ctx[CTX_KEY[param]] = value
@@ -96,20 +118,56 @@ def _run_one(task):
     rp.collar_and_hypocotyl = functools.partial(
         _ORIG['collar_and_hypocotyl'], angle_max=code['hypocotyl_angle_deg'],
         frac=code['climb_fraction'], haut_min_mm=code['high_branch_mm'])
+    base = {'batch': batch['name'], 'sample': sample, 'parameter': param, 'side': side, 'value': value}
     try:
-        n_raw, n_rem, T = rp.process(sample, ctx)
+        R = rp.analyse_mask(BW, ctx, pre=pre)
     except Exception as e:                                   # keep going, log the failure
-        return {'batch': batch['name'], 'sample': sample, 'parameter': param,
-                'side': side, 'value': value, 'error': repr(e)}
-    row = {'batch': batch['name'], 'sample': sample, 'parameter': param, 'side': side,
-           'value': value, 'n_raw': n_raw, 'n_removed': n_rem}
-    row.update({k: T.get(k) for k, _, _ in rp.COLS})
+        return dict(base, error=repr(e))
+    row = dict(base, n_raw=R['n_raw'], n_removed=R['n_removed'])
+    row.update({k: R['T'].get(k) for k, _, _ in rp.COLS})
     return row
+
+
+def _run_sample(stask):
+    """All the variants of one sample. The mask is loaded once, and the steps that do
+    not depend on the thresholds (distance map, skeleton, pruning per length) are
+    computed once and shared by the variants: same results as separate runs, several
+    times faster."""
+    batch, sample, vlist = stask
+    ctx0 = _sample_ctx(batch, sample)
+    path = os.path.join(ctx0['data_dir'], ctx0['pattern'].format(name=sample))
+    V = load_volume(path, axis_order=ctx0['axis_order'], var_name=ctx0.get('var_name'))
+    BW = V > 0.5 * float(np.max(V))
+    del V
+    pre = rp.prepare_mask(BW, ctx0['voxel_size'])
+    return [_variant(batch, sample, v, BW, pre, ctx0) for v in vlist]
 
 
 _ORIG = {'detect_base': rp.detect_base,
          'collar_and_hypocotyl': dh.collar_and_hypocotyl,
          'compute_all_traits': rtf.compute_all_traits}
+
+
+def _child(stask, q):
+    q.put(_run_sample(stask))
+
+
+def _run_isolated(stask, timeout):
+    """Run all the variants of one sample in their own process, with a time limit."""
+    batch, sample, vlist = stask
+    q = mp.Queue()
+    p = mp.Process(target=_child, args=(stask, q), daemon=True)
+    p.start()
+    try:
+        return q.get(timeout=timeout)
+    except Exception:
+        reason = 'timeout' if p.is_alive() else f'process ended without a result (exit code {p.exitcode}, out of memory?)'
+        return [{'batch': batch['name'], 'sample': sample, 'parameter': v[0], 'side': v[1],
+                 'value': v[2], 'error': reason} for v in vlist]
+    finally:
+        if p.is_alive():
+            p.terminate()
+        p.join(5)
 
 
 def summarize(df):
@@ -132,6 +190,19 @@ def summarize(df):
     return pd.DataFrame(rows)
 
 
+def load_selection(batch_name):
+    """{sample: variable} from RESULTS_ROOT/<batch>/selection_versions.csv, written by a
+    dedicated re-processing script (e.g. retraiter_B2T3.py) for batches whose files hold
+    several versions of the mask; empty when the file does not exist."""
+    import csv
+    path = os.path.join(rp.RESULTS_ROOT, batch_name, 'selection_versions.csv')
+    if not os.path.exists(path):
+        return {}
+    with open(path, newline='') as f:
+        return {r['sample']: r['variable_used'] for r in csv.DictReader(f)
+                if r['variable_used'] and r['variable_used'] != '(largest)'}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[2])
     ap.add_argument('--batch', action='append', required=True,
@@ -147,28 +218,62 @@ def main():
     for name in args.batch:
         if name not in defs:
             sys.exit(f"Batch '{name}' is not defined in params.txt")
-        b = defs[name]
+        b = dict(defs[name], selection=load_selection(name))
+        if b['selection']:
+            print(f"{name}: mask variables read from selection_versions.csv")
         samples = rp.list_samples(os.path.join(rp.DATA_ROOT, name), b['pattern'])
         pick = sorted(rng.sample(samples, min(args.n, len(samples))))
         print(f"{name}: {len(pick)} of {len(samples)} samples")
         tasks += [(b, s, v) for s in pick for v in variants()]
     print(f"{len(tasks)} runs ({len(variants())} variants per sample)")
 
-    rows = []
-    if args.workers > 1:
-        with mp.Pool(args.workers) as pool:
-            for k, r in enumerate(pool.imap_unordered(_run_one, tasks), 1):
-                rows.append(r)
-                if k % 20 == 0:
-                    print(f"  {k}/{len(tasks)}", flush=True)
-    else:
-        for k, t in enumerate(tasks, 1):
-            rows.append(_run_one(t))
-            if k % 20 == 0:
-                print(f"  {k}/{len(tasks)}", flush=True)
-
+    # Every run is written to the partial file as soon as it ends, so an interrupted
+    # analysis resumes where it stopped (same --seed = same samples). Each run is a
+    # separate process with the per sample time limit of params.txt (TIMEOUT): a run
+    # that hangs or crashes (for example out of memory) is recorded as failed and the
+    # analysis goes on, and its memory is freed at once.
     out = os.path.join(rp.RESULTS_ROOT, 'sensitivity')
     os.makedirs(out, exist_ok=True)
+    part = os.path.join(out, 'sensitivity_partial.jsonl')
+    key = lambda b, smp, v: f"{b}|{smp}|{v[0]}|{v[1]}"
+    done = {}
+    if os.path.exists(part):
+        with open(part, encoding='utf-8') as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if not r.get('error'):
+                    done[key(r['batch'], r['sample'], (r['parameter'], r['side']))] = r
+    todo = [t for t in tasks if key(t[0]['name'], t[1], t[2][:2]) not in done]
+    rows = list(done.values())
+    if done:
+        print(f"{len(done)} runs already done (resumed from {part}), {len(todo)} to do")
+    # group the remaining variants by sample: one process per sample
+    groups = {}
+    for b, smp, v in todo:
+        groups.setdefault((b['name'], smp), (b, smp, []))[2].append(v)
+    stasks = list(groups.values())
+    nvar = len(variants())
+    limit = max(rp.TIMEOUT, 120 * nvar)
+    t0 = time.time()
+    print(f"{len(stasks)} samples to process, all their variants at once "
+          f"(time limit {limit} s per sample); progress is shown after every sample", flush=True)
+    with open(part, 'a', encoding='utf-8') as fp, ThreadPoolExecutor(max(1, args.workers)) as ex:
+        futs = [ex.submit(_run_isolated, st, limit) for st in stasks]
+        for k, fu in enumerate(as_completed(futs), 1):
+            res = fu.result()
+            for r in res:
+                rows.append(r)
+                fp.write(json.dumps(r, default=float) + '\n')
+            fp.flush()
+            el = time.time() - t0
+            nerr = sum(1 for r in res if r.get('error'))
+            err = f"  {nerr} FAILED: {next(r['error'] for r in res if r.get('error'))[:60]}" if nerr else ''
+            print(f"  {k}/{len(stasks)} samples  {res[0]['batch']} {res[0]['sample']} ({len(res)} variants){err}"
+                  f"  | elapsed {el / 60:.1f} min, about {el / k * (len(stasks) - k) / 60:.0f} min left", flush=True)
+
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out, 'sensitivity_traits.csv'), index=False)
     if 'error' in df.columns:
