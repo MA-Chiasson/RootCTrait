@@ -10,8 +10,8 @@ volume itself. Segmentation errors propagate directly into the traits:
 
 - Surface "sheets" / dense pollution near the collar inflate any trait that
   aggregates over segments (total length, counts, branching order, density).
-- Volume traits (`CHV`, `VRT`, `SRT`, `IC`, `SRL`) are the most sensitive, and are
-  affected by water content in the pot at scan time. `VRT` and `SRT` are measured
+- Volume traits (`CHV`, `TRV`, `TRSA`, `CI`, `RLV`) are the most sensitive, and are
+  affected by water content in the pot at scan time. `TRV` and `TRSA` are measured
   on the part of the mask attached to the cleaned roots, so they exclude the
   hypocotyl and removed artifacts, but they still depend on how thick the
   segmentation draws each root.

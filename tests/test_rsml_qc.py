@@ -58,7 +58,7 @@ def test_robust_z_flags_outlier():
 
 
 def test_rank_puts_flagged_samples_first():
-    rows = [{'name': f'S{i}', 'T': {'LRP': 60 + i, 'PM': 50, 'TRL': 300, 'NRL': 40, 'ANGO2': 45, 'DRP': 1.5,
+    rows = [{'name': f'S{i}', 'T': {'PRL': 60 + i, 'MD': 50, 'TRL': 300, 'NLR': 40, 'ANGO2': 45, 'PRD': 1.5,
                                     '%removed': 20, 'N_RESCUED': 1, 'COLLAR_RAISE': 2, 'HYPOCOTYL_LEN': 0,
                                     'PIVOT_RETURN': 0, 'LRP_PM': (60 + i) / 50}} for i in range(8)]
     rows[3]['T']['PIVOT_RETURN'] = 5.0

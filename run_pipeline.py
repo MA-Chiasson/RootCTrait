@@ -107,16 +107,16 @@ QC_COLS = [('pivot_return', 'mm', 'PIVOT_RETURN'), ('n_rescued', 'count', 'N_RES
            ('collar_raise', 'mm', 'COLLAR_RAISE'), ('hypocotyl', 'mm', 'HYPOCOTYL_LEN'),
            ('time', 's', 'SECONDS')]
 
-COLS = [('LRP', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm', .1),
-        ('NRL', 'count', 1), ('NRL_short_<5', 'count', 1), ('NRL_medium_5_15', 'count', 1),
-        ('NRL_long_>15', 'count', 1), ('PM', 'cm', .1), ('D50', 'cm', .1), ('D95', 'cm', .1),
-        ('WX', 'cm', .1), ('WZ', 'cm', .1), ('LM', 'cm', .1), ('W25', 'cm', .1), ('W50', 'cm', .1),
-        ('W75', 'cm', .1), ('RLP', 'ratio', 1),
+COLS = [('PRL', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm', .1),
+        ('NLR', 'count', 1), ('NLR_short_<5', 'count', 1), ('NLR_medium_5_15', 'count', 1),
+        ('NLR_long_>15', 'count', 1), ('MD', 'cm', .1), ('D50', 'cm', .1), ('D95', 'cm', .1),
+        ('WX', 'cm', .1), ('WZ', 'cm', .1), ('MW', 'cm', .1), ('W25', 'cm', .1), ('W50', 'cm', .1),
+        ('W75', 'cm', .1), ('WDR', 'ratio', 1),
         ('ANGO2', 'deg', 1), ('ANGO2_sd', 'deg', 1), ('ANGI', 'deg', 1),
-        ('CHV', 'cm3', .001), ('VRT', 'cm3', .001), ('SRT', 'cm2', .01), ('IC', 'ratio', 1),
-        ('SRL', 'cm/cm3', 100), ('NT', 'count', 1), ('NBP', 'count', 1), ('MaxO', 'count', 1),
-        ('DR', 'nb/cm', 1), ('NTR', 'count', 1), ('IBD', 'cm', .1), ('DRP', 'mm', 1),
-        ('DRS', 'mm', 1), ('DMAX', 'mm', 1), ('DD_cv', 'ratio', 1), ('TAPER', 'frac/cm', 1),
+        ('CHV', 'cm3', .001), ('TRV', 'cm3', .001), ('TRSA', 'cm2', .01), ('CI', 'ratio', 1),
+        ('RLV', 'cm/cm3', 100), ('NT', 'count', 1), ('NBP', 'count', 1), ('MaxO', 'count', 1),
+        ('LRD', 'nb/cm', 1), ('NCR', 'count', 1), ('IBD', 'cm', .1), ('PRD', 'mm', 1),
+        ('MLD', 'mm', 1), ('DMAX', 'mm', 1), ('DD_cv', 'ratio', 1), ('TAPER', 'frac/cm', 1),
         ('TOR', 'ratio', 1)]
 
 
@@ -353,13 +353,13 @@ def analyse_mask(BW, ctx, pre=None):
     orphans = []
     if roots:
         roots, orphans = keep_base_component(roots, base)
-    # Pivot extended up to the raised collar, so that the pivot length (LRP) starts
+    # Pivot extended up to the raised collar, so that the pivot length (PRL) starts
     # at base2 (the true start of the primary root).
     prim2 = _extend_pivot(prim, sk, base, base2, voxel_size)
     skv_clean = np.vstack([s['coords'] for s in roots]) if roots else voxels
     # Volume and surface are measured on the mask restricted to the cleaned roots.
     BW_roots = root_mask(BW, mask_segs, roots, prim2, voxel_size)
-    # base2 = reference collar for the traits (depths, LRP, angles).
+    # base2 = reference collar for the traits (depths, PRL, angles).
     T = compute_all_traits(roots, prim2, base2, BW_roots, edt, voxel_size, skv_clean)
     # Quality control values, written next to the traits (not traits themselves).
     vs_ = np.asarray(voxel_size, float)
@@ -531,13 +531,13 @@ def _handle_result(name, status, payload, t0, store, checkpoint, failures_path):
         rec = {'name': name, 'n_raw': nb, 'n_removed': nr, 'T': _clean_T(T), 'seconds': round(dt, 1)}
         store[name] = rec
         append_store(checkpoint, rec)
-        lrp = T.get('LRP') if isinstance(T, dict) else None
-        nrl = T.get('NRL') if isinstance(T, dict) else None
+        lrp = T.get('PRL') if isinstance(T, dict) else None
+        nrl = T.get('NLR') if isinstance(T, dict) else None
         lrp_s = f"{lrp/10:.1f}cm" if isinstance(lrp, (int, float)) else "NA"
         nrl_s = f"{nrl}" if nrl is not None else "NA"
         pct = 100 * nr / max(1, nb)
         print(f"  {name:6s} raw={nb:4d} removed={nr:4d} ({pct:3.0f}%) "
-              f"LRP={lrp_s} NRL={nrl_s}  [{dt:.0f}s]", flush=True)
+              f"PRL={lrp_s} NLR={nrl_s}  [{dt:.0f}s]", flush=True)
     elif status == 'timeout':
         _append_failure(failures_path, {'name': name, 'status': 'timeout',
                                         'msg': f'exceeded {TIMEOUT}s',

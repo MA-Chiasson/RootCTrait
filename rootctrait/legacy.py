@@ -1,17 +1,21 @@
 """Former output column names, kept only to read files written by earlier versions.
 
 Versions before 2.1.0 wrote some table columns and checkpoint keys with French
-names. They are renamed to their English equivalents when an old checkpoint or
-trait table is read, so that partial runs can be resumed and old tables merged.
+names, and versions before 2.5.0 used trait abbreviations derived from French
+(LRP, NRL, PM, VRT, ...; see rootctrait/trait_names.py). They are renamed to their
+current English equivalents when an old checkpoint or trait table is read, so that
+partial runs can be resumed and old tables merged.
 """
+from .trait_names import OLD_TO_NEW
 
 # former table column / trait name -> current name
 LEGACY_COLUMNS = {
     "n_brut": "n_raw",
     "n_retire": "n_removed",
     "%retire": "%removed",
-    "NRL_court_<5": "NRL_short_<5",
-    "NRL_moyen_5_15": "NRL_medium_5_15",
+    "NRL_court_<5": "NLR_short_<5",
+    "NRL_moyen_5_15": "NLR_medium_5_15",
+    **OLD_TO_NEW,
 }
 
 # former checkpoint record key -> current key

@@ -213,16 +213,16 @@ def build(level, seed):
     lat = [r for r in roots if r['order'] >= 2]
     o2 = [r for r in roots if r['order'] == 2]
     allP = np.vstack([r['P'] for r in roots])
-    T = dict(LRP=path_len(roots[0]['P']), TRL=sum(path_len(r['P']) for r in roots),
-             LTRL=sum(path_len(r['P']) for r in lat), NRL=len(lat), NT=sum(1 for r in roots if r['nchild'] == 0),
+    T = dict(PRL=path_len(roots[0]['P']), TRL=sum(path_len(r['P']) for r in roots),
+             LTRL=sum(path_len(r['P']) for r in lat), NLR=len(lat), NT=sum(1 for r in roots if r['nchild'] == 0),
              MaxO=max(r['order'] for r in roots),
              MLRL=float(np.mean([path_len(r['P']) for r in lat])),
              ANGO2=float(np.mean([angle_vertical(r['P'][0], r['P'][-1]) for r in o2])),
-             PM=float(allP[:, 0].max() - collar[0]),
-             DRP=float(np.mean(2 * roots[0]['R'])),
-             DRS=float(np.mean([2 * np.median(r['R']) for r in lat])),
+             MD=float(allP[:, 0].max() - collar[0]),
+             PRD=float(np.mean(2 * roots[0]['R'])),
+             MLD=float(np.mean([2 * np.median(r['R']) for r in lat])),
              TOR=float(np.mean([path_len(r['P']) / np.linalg.norm(r['P'][-1] - r['P'][0]) for r in lat])),
-             VRT=float((labels == 1).sum() * VS.prod()), PIVOT_RETURN=hook)
+             TRV=float((labels == 1).sum() * VS.prod()), PIVOT_RETURN=hook)
     return V, labels, T, collar
 
 
@@ -242,8 +242,8 @@ def seg_points(segs, off):
     return np.vstack([s['coords'] for s in segs]) + off if segs else np.zeros((0, 3), int)
 
 
-TRAITS = ['LRP', 'TRL', 'LTRL', 'NRL', 'NT', 'MaxO', 'MLRL', 'ANGO2', 'PM', 'DRP', 'DRS', 'TOR', 'VRT']
-TO_MM = dict(VRT=1.0)                            # compute_all_traits works in mm and mm3
+TRAITS = ['PRL', 'TRL', 'LTRL', 'NLR', 'NT', 'MaxO', 'MLRL', 'ANGO2', 'MD', 'PRD', 'MLD', 'TOR', 'TRV']
+TO_MM = dict(TRV=1.0)                            # compute_all_traits works in mm and mm3
 
 
 def main():

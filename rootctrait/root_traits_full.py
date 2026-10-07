@@ -157,8 +157,8 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     # ---- primary ----
     PPv = np.asarray(primary_path, int)
     PP = PPv.astype(float) * vs
-    LRP = _len_phys(PP)
-    T['LRP'] = LRP
+    PRL = _len_phys(PP)
+    T['PRL'] = PRL
     T['PIVOT_RETURN'] = pivot_return_mm(PPv, vs)   # quality control, not a trait
 
     # ---- per segment ----
@@ -170,25 +170,25 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T['TRL'] = float(seglen.sum())
     T['LTRL'] = float(seglen[lat].sum()) if lat.any() else 0.0
     T['MLRL'] = float(seglen[lat].mean()) if lat.any() else 0.0
-    T['NRL'] = int(lat.sum())
+    T['NLR'] = int(lat.sum())
     # distribution of lateral lengths into classes (mm)
     # Keys must match the pipeline output columns (COLS in run_pipeline.py).
     ll = seglen[lat]
-    T['NRL_short_<5'] = int((ll < 5).sum())
-    T['NRL_medium_5_15'] = int(((ll >= 5) & (ll < 15)).sum())
-    T['NRL_long_>15'] = int((ll >= 15).sum())
+    T['NLR_short_<5'] = int((ll < 5).sum())
+    T['NLR_medium_5_15'] = int(((ll >= 5) & (ll < 15)).sum())
+    T['NLR_long_>15'] = int((ll >= 15).sum())
 
     # ---- skeleton point cloud (depth, width, hull) ----
     A = skv_full.astype(float) * vs
     depth = A[:, 0] - baseY
     # "Top" correction: ignore material ABOVE the collar (negative depth) for the
     # depth traits. Those points (upward laterals, noise, or hypocotyl near the
-    # collar) are not part of the root system below the collar and would bias PM
+    # collar) are not part of the root system below the collar and would bias MD
     # and the depth distribution. A small margin (-2mm) allows for collar position
     # uncertainty.
     below_collar = depth >= -2.0
     depth_valid = depth[below_collar]
-    T['PM'] = float(depth_valid.max()) if len(depth_valid) else 0.0
+    T['MD'] = float(depth_valid.max()) if len(depth_valid) else 0.0
     sd = np.sort(depth_valid)
     T['D50'] = float(np.percentile(sd, 50)) if len(sd) else 0.0
     T['D95'] = float(np.percentile(sd, 95)) if len(sd) else 0.0
@@ -196,13 +196,13 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     WZ = float(A[:, 2].max() - A[:, 2].min()) if len(A) else 0.0
     T['WX'] = WX
     T['WZ'] = WZ
-    T['LM'] = max(WX, WZ)
-    T['RLP'] = (T['LM'] / T['PM']) if T['PM'] > 0 else np.nan
+    T['MW'] = max(WX, WZ)
+    T['WDR'] = (T['MW'] / T['MD']) if T['MD'] > 0 else np.nan
 
     def width_at(frac):
-        if T['PM'] <= 0:
+        if T['MD'] <= 0:
             return 0.0
-        lo, hi = frac * T['PM'] - 2.0, frac * T['PM'] + 2.0
+        lo, hi = frac * T['MD'] - 2.0, frac * T['MD'] + 2.0
         m = (depth >= lo) & (depth <= hi)
         if m.sum() < 2:
             return 0.0
@@ -245,21 +245,21 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
         T['CHV'] = np.nan
 
     # ---- volume and surface from the mask (pass the mask restricted to the
-    # cleaned roots, see root_mask, so that IC and SRL combine consistent quantities) ----
+    # cleaned roots, see root_mask, so that CI and RLV combine consistent quantities) ----
     vvol = float(np.prod(vs))
-    VRT = float(BW.sum()) * vvol
-    T['VRT'] = VRT
+    TRV = float(BW.sum()) * vvol
+    T['TRV'] = TRV
     try:
         verts, faces, _, _ = measure.marching_cubes(BW.astype(np.uint8), level=0.5, spacing=tuple(vs))
-        T['SRT'] = float(measure.mesh_surface_area(verts, faces))
+        T['TRSA'] = float(measure.mesh_surface_area(verts, faces))
     except Exception:
-        T['SRT'] = np.nan
-    if T['CHV'] and T['CHV'] > 0 and VRT > 0:
-        _ic = VRT / T['CHV']
-        T['IC'] = _ic if _ic <= 1.0 else np.nan      # IC > 1 = degenerate convex hull
+        T['TRSA'] = np.nan
+    if T['CHV'] and T['CHV'] > 0 and TRV > 0:
+        _ic = TRV / T['CHV']
+        T['CI'] = _ic if _ic <= 1.0 else np.nan      # CI > 1 = degenerate convex hull
     else:
-        T['IC'] = np.nan
-    T['SRL'] = (T['TRL'] / VRT) if VRT > 0 else np.nan  # mm/mm3
+        T['CI'] = np.nan
+    T['RLV'] = (T['TRL'] / TRV) if TRV > 0 else np.nan  # mm/mm3
 
     # ---- topology on the segment tree (robust to skeleton pollution) ----
     seg_ids = [s['seg_id'] for s in segments]
@@ -268,16 +268,16 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     T['NT'] = int(sum(1 for sid in seg_ids if sid not in is_parent))   # leaf segments = apices
     T['NBP'] = int(len(parents_lat))                                    # branch sites carrying a lateral
     T['MaxO'] = int(orders.max()) if len(orders) else 0
-    T['DR'] = (T['NRL'] / (LRP / 10.0)) if LRP > 0 else np.nan          # laterals per cm of pivot
+    T['LRD'] = (T['NLR'] / (PRL / 10.0)) if PRL > 0 else np.nan          # laterals per cm of pivot
 
-    # ---- NTR: roots starting from the collar (proxy: proximal end <=4 mm from base, order <=2) ----
+    # ---- NCR: roots starting from the collar (proxy: proximal end <=4 mm from base, order <=2) ----
     nb = 0
     for s in segments:
         C = s['coords'].astype(float) * vs
         dmin = min(np.linalg.norm(C[0] - basephys), np.linalg.norm(C[-1] - basephys))
         if dmin <= 4.0 and s['order'] <= 2:
             nb += 1
-    T['NTR'] = max(1, nb)
+    T['NCR'] = max(1, nb)
 
     # ---- IBD: spacing of lateral insertion points along the pivot ----
     if PP.shape[0] >= 2 and lat.any():
@@ -298,8 +298,8 @@ def compute_all_traits(segments, primary_path, base_rcp, BW, edt, voxel_size, sk
     # ---- diameters ----
     skv = skv_full.astype(int)
     dia_pp = 2.0 * edt[PPv[:, 0], PPv[:, 1], PPv[:, 2]]
-    T['DRP'] = float(np.mean(dia_pp)) if len(dia_pp) else np.nan
-    T['DRS'] = float(np.mean(segdiam[lat])) if lat.any() else np.nan
+    T['PRD'] = float(np.mean(dia_pp)) if len(dia_pp) else np.nan
+    T['MLD'] = float(np.mean(segdiam[lat])) if lat.any() else np.nan
     T['DMAX'] = 2.0 * float(edt[skv[:, 0], skv[:, 1], skv[:, 2]].max()) if len(skv) else np.nan
     mu = np.mean(segdiam) if len(segdiam) else np.nan
     T['DD_cv'] = float(np.std(segdiam) / mu) if (mu and mu > 0) else np.nan

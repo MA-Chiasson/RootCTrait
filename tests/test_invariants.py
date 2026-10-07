@@ -59,7 +59,7 @@ def test_example_produces_traits():
 
 
 def test_trl_ge_lrp():
-    assert T['TRL'] >= T['LRP'] - 1e-6
+    assert T['TRL'] >= T['PRL'] - 1e-6
 
 
 def test_ltrl_le_trl():
@@ -67,12 +67,12 @@ def test_ltrl_le_trl():
 
 
 def test_compactness_le_one():
-    assert T['IC'] <= 1.0 + 1e-6
+    assert T['CI'] <= 1.0 + 1e-6
 
 
 def test_nrl_equals_sum_of_classes():
-    s = T['NRL_short_<5'] + T['NRL_medium_5_15'] + T['NRL_long_>15']
-    assert s == T['NRL']
+    s = T['NLR_short_<5'] + T['NLR_medium_5_15'] + T['NLR_long_>15']
+    assert s == T['NLR']
 
 
 def test_angles_in_range():
@@ -83,7 +83,7 @@ def test_angles_in_range():
 
 
 def test_core_traits_not_nan():
-    for k in ('LRP', 'TRL', 'NRL', 'PM'):
+    for k in ('PRL', 'TRL', 'NLR', 'MD'):
         v = T[k]
         assert not (isinstance(v, float) and np.isnan(v)), f"{k} is NaN"
 

@@ -13,7 +13,7 @@ written by the pipeline (checkpoint_traits.jsonl of each batch):
   hypocotyl long    length of the excluded hypocotyl
   path / depth      ratio of primary root length to rooting depth (a primary path
                     that wanders along laterals or through a contact is long for its depth)
-  trait outlier     LRP, PM, TRL, NRL, ANGO2 or DRP far from the rest of the batch
+  trait outlier     PRL, MD, TRL, NLR, ANGO2 or PRD far from the rest of the batch
 
 Except for the pivot return, a value is flagged when it lies above the batch median
 by more than K robust standard deviations (1.4826 x median absolute deviation),
@@ -41,7 +41,7 @@ PIVOT_FLAG_MM = 3.0
 HIGH_ONLY = [('removal high', '%removed'), ('rescued high', 'N_RESCUED'),
              ('collar raised', 'COLLAR_RAISE'), ('hypocotyl long', 'HYPOCOTYL_LEN'),
              ('path / depth', 'LRP_PM')]
-TWO_SIDED = ['LRP', 'PM', 'TRL', 'NRL', 'ANGO2', 'DRP']
+TWO_SIDED = ['PRL', 'MD', 'TRL', 'NLR', 'ANGO2', 'PRD']
 
 
 def load_batch(res_dir):
@@ -64,7 +64,7 @@ def load_batch(res_dir):
         T = dict(r.get('T') or {})
         nb, nr = r.get('n_raw'), r.get('n_removed')
         T['%removed'] = 100.0 * nr / nb if nb else None
-        lrp, pm = T.get('LRP'), T.get('PM')
+        lrp, pm = T.get('PRL'), T.get('MD')
         T['LRP_PM'] = lrp / pm if (isinstance(lrp, (int, float)) and isinstance(pm, (int, float)) and pm > 0) else None
         rows.append(dict(name=name, T=T))
     return rows
@@ -108,7 +108,7 @@ def rank_batch(rows, k=3.0):
         out.append(dict(ID=r['name'], n_flags=len(flags), max_z=round(zmax, 2), flags='; '.join(flags),
                         pivot_return=T.get('PIVOT_RETURN'), pct_removed=T.get('%removed'),
                         n_rescued=T.get('N_RESCUED'), collar_raise=T.get('COLLAR_RAISE'),
-                        hypocotyl=T.get('HYPOCOTYL_LEN'), LRP=T.get('LRP'), PM=T.get('PM')))
+                        hypocotyl=T.get('HYPOCOTYL_LEN'), PRL=T.get('PRL'), MD=T.get('MD')))
     out.sort(key=lambda d: (-d['n_flags'], -d['max_z'], d['ID']))
     return out
 

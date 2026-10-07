@@ -157,10 +157,10 @@ gives the same results on a laptop and on a computing cluster.
 **Docker** (from the repository root):
 
 ```bash
-docker build -t rootctrait:2.4.0 .
+docker build -t rootctrait:2.5.0 .
 # the current folder holds params.txt, the data folder and receives results/
-docker run --rm -v "$PWD":/work rootctrait:2.4.0
-docker run --rm -v "$PWD":/work rootctrait:2.4.0 python -m tools.qc_rank --results /work/results
+docker run --rm -v "$PWD":/work rootctrait:2.5.0
+docker run --rm -v "$PWD":/work rootctrait:2.5.0 python -m tools.qc_rank --results /work/results
 ```
 
 **Apptainer** (Singularity), for clusters where Docker is not available, such as
@@ -170,7 +170,7 @@ can build (your own Linux machine, WSL, or a cluster that allows it), then copy 
 
 ```bash
 apptainer build rootctrait.sif rootctrait.def
-# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.4.0
+# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.5.0
 ```
 
 Example Slurm job, run from the project folder on the cluster:
@@ -475,6 +475,8 @@ python -m tools.figure_report               # writes results/figure_report.html
 python -m tools.merge_batches --format both # merges all batch tables into one file
 python -m tools.extract_checkpoint          # rebuilds tables from the checkpoints
 python -m tools.qc_rank                     # ranks the samples for review (results/qc_ranking.csv)
+python -m tools.manual_validation export --selection sel.csv   # point clouds to trace by hand
+python -m tools.manual_validation compare --selection sel.csv  # RootCTrait against manual tracing
 ```
 
 ### Example 7: sensitivity of the traits to the thresholds
@@ -534,7 +536,7 @@ In `results/`, after `python -m tools.qc_rank` (or the Figure report of the app)
 - **`qc_ranking.csv`**: the samples of each batch ranked for visual review. Explicit
   rules flag a sample when its pivot return exceeds 3 mm, or when one of its quality
   control values (`%removed`, `n_rescued`, `collar_raise`, `hypocotyl`, the ratio
-  LRP/PM) is high, or one of LRP, PM, TRL, NRL, ANGO2, DRP is unusual, for its batch
+  PRL/MD) is high, or one of PRL, MD, TRL, NLR, ANGO2, PRD is unusual, for its batch
   (more than 3 robust standard deviations from the batch median; `--k` changes the
   threshold). Samples are sorted by number of flags, and the figure report follows
   this order and prints the flags on each card. The ranking only orders the review;
@@ -640,6 +642,7 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── extract_checkpoint.py       Rebuild tables from checkpoints
 │   ├── figure_report.py            HTML index to review 3D figures (QC)
 │   ├── qc_rank.py                  Ranking of the samples for visual review
+│   ├── manual_validation.py        Validation against manual tracing in CloudCompare
 │   └── sensitivity.py              One-at-a-time sensitivity analysis of the thresholds
 ├── docs/traits.md              Trait reference
 ├── docs/limitations.md         Known limitations

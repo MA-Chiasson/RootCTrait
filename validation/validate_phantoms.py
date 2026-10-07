@@ -69,7 +69,7 @@ def make_phantom(n_lat, lat_len_vox, spread_vox, pivot_len_vox=150, seed=0):
         _capsule(V, p0, p1, 1.2)
         TRL_true += _phys_len(p0, p1)
         angles.append(_angle_vert(p0, p1))
-    truths = {'LRP': LRP_true, 'TRL': TRL_true, 'NRL': n_lat,
+    truths = {'PRL': LRP_true, 'TRL': TRL_true, 'NLR': n_lat,
               'ANGO2': float(np.mean(angles))}
     return V.astype(np.uint8), truths
 
@@ -96,7 +96,7 @@ def main():
     for name, kw in phantoms:
         V, truth = make_phantom(**kw)
         M = measure(V)
-        for tr in ['LRP', 'TRL', 'NRL', 'ANGO2']:
+        for tr in ['PRL', 'TRL', 'NLR', 'ANGO2']:
             t, m = truth[tr], M[tr]
             err = 100 * (m - t) / t if t else float('nan')
             rows.append([name, tr, round(t, 2), round(m, 2), round(err, 1)])
@@ -106,7 +106,7 @@ def main():
         w = csv.writer(f); w.writerow(["phantom", "trait", "true", "measured", "err_pct"]); w.writerows(rows)
     # aggregate absolute error per trait
     print("=== mean absolute error per trait ===")
-    for tr in ['LRP', 'TRL', 'NRL', 'ANGO2']:
+    for tr in ['PRL', 'TRL', 'NLR', 'ANGO2']:
         errs = [abs(r[4]) for r in rows if r[1] == tr]
         print(f"  {tr:>6}: {np.mean(errs):.1f}% mean abs error")
 
