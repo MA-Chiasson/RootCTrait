@@ -4,7 +4,6 @@ message: "If you use this software, please cite it as below."
 type: software
 version: 2.5.0
 date-released: 2026-10-07
-doi: 10.5281/zenodo.23148522  # replace by the DOI of the 2.5.0 release once archived on Zenodo
 authors:
   - family-names: "Chiasson"
     given-names: "Marc-Antoine"
@@ -21,6 +20,9 @@ keywords:
   - plant genetics
   - GWAS
 identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23218195
+    description: "Archived version 2.5.0"
   - type: doi
     value: 10.5281/zenodo.23148522
     description: "Archived version 2.4.0"
