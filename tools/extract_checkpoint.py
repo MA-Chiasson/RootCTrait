@@ -33,6 +33,7 @@ PROJECT_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, PROJECT_ROOT)
 from rootctrait.legacy import upgrade_record
+from rootctrait.sorting import natural_key
 
 
 def load_factors():
@@ -97,6 +98,7 @@ def read_checkpoint(path):
     if not rows:
         return None
     df = pd.DataFrame(rows)
+    df = df.iloc[sorted(range(len(df)), key=lambda i: natural_key(df['ID'].iloc[i]))].reset_index(drop=True)
     lead = [c for c in ["ID", "n_raw", "n_removed", "%removed"] + [c_ for c_, _ in QC] if c in df.columns]
     ordered = [c for c in COL_ORDER if c in df.columns]              # same order as normal output
     rest = [c for c in df.columns if c not in lead + ordered]
@@ -121,7 +123,7 @@ def main():
         paths = [args[0]]
     else:
         root = results_root()
-        paths = sorted(glob.glob(os.path.join(root, "*", "*checkpoint*.jsonl")))
+        paths = sorted(glob.glob(os.path.join(root, "*", "*checkpoint*.jsonl")), key=natural_key)
         paths += sorted(glob.glob(os.path.join(root, "*checkpoint*.jsonl")))
     if not paths:
         print("No checkpoint file found.")

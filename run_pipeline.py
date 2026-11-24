@@ -23,6 +23,7 @@ Batches to process: BATCHES=ALL (all defined) or BATCHES=batch1,batch2
 """
 import warnings; warnings.filterwarnings('ignore')
 import os, re, time, json, math, glob
+from rootctrait.sorting import natural_key
 import multiprocessing as mp
 import numpy as np
 import scipy.ndimage as ndimage
@@ -86,6 +87,7 @@ DROP_ORPHANS = PARAMS.get('DROP_ORPHANS', '1').lower() not in ('0', 'false', 'no
 DENS_MAX = float(PARAMS.get('DENS_MAX', '35'))
 DENS_LEN_MAX = float(PARAMS.get('DENS_LEN_MAX', '6'))
 RESCUE_MIN_MM = float(PARAMS.get('RESCUE_MIN_MM', '5'))
+COLLAR_CLIMB = int(PARAMS.get('COLLAR_CLIMB', '0'))   # 1 = raise the collar along the thick column (before 2.6)
 SAVE_FIGURES = PARAMS.get('SAVE_FIGURES', '1').lower() not in ('0', 'false', 'no')
 # One RSML file per sample (cleaned root tree, Root System Markup Language).
 EXPORT_RSML = PARAMS.get('EXPORT_RSML', '1').lower() not in ('0', 'false', 'no')
@@ -344,7 +346,8 @@ def analyse_mask(BW, ctx, pre=None):
     # base2 = collar raised along the thick column up to the hypocotyl (start of the
     # pivot at the true top of the fleshy base). hypo_ids = vertical column + the
     # branches hanging high on the stem; horizontal roots at collar level stay roots.
-    base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, voxel_size)
+    base2, hypo_ids, gain, column_pts = collar_and_hypocotyl(sk, edt, kept, base, voxel_size,
+                                                             climb=bool(ctx.get('collar_climb', 0)))
     roots = [s for s in kept if s['seg_id'] not in hypo_ids]
     hypocotyl = [s for s in kept if s['seg_id'] in hypo_ids]
     # Orphan cleanup: one connectivity pass after removing the hypocotyl drops the
@@ -489,7 +492,7 @@ def list_samples(data_dir, pattern):
     for fp in glob.glob(os.path.join(data_dir, pre + '*' + suf)):
         b = os.path.basename(fp)
         names.append(b[len(pre):len(b) - len(suf)] if suf else b[len(pre):])
-    return sorted(names, key=lambda s: (int(re.findall(r'\d+', s)[-1]) if re.findall(r'\d+', s) else 0, s))
+    return sorted(names, key=natural_key)
 
 
 def _effective_params():
@@ -508,6 +511,7 @@ def _effective_params():
         'dens_max': DENS_MAX,
         'dens_len_max': DENS_LEN_MAX,
         'rescue_min_mm': RESCUE_MIN_MM,
+        'collar_climb': COLLAR_CLIMB,
         'save_figures': SAVE_FIGURES,
         'export_rsml': EXPORT_RSML,
     }

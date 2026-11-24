@@ -77,15 +77,17 @@ For each sample:
    the system by the shortest skeleton path through the removed layer, and the
    ordered tree is rebuilt on the cleaned skeleton, so that rescued roots recover a
    parent and an order and the primary root is chosen among genuine roots only.
-6. **Raise the collar and exclude the hypocotyl**: the collar climbs along the
-   thick base column and stops at the hypocotyl; the hypocotyl (vertical stem
-   column above the collar plus the branches hanging high on it) is excluded,
-   while basal roots at collar level are kept.
+6. **Exclude the hypocotyl**: the hypocotyl (vertical stem column above the
+   collar plus the branches hanging high on it) is excluded, while basal roots at
+   collar level are kept. The collar stays at the thickest skeleton point, so a
+   deeper sowing simply gives a longer excluded hypocotyl. (Versions before 2.6.0
+   also raised the collar along the thick base column; set `COLLAR_CLIMB=1` to
+   restore that behaviour.)
 7. **Orphan cleanup**: after the hypocotyl is removed, one connectivity pass drops
    any detached fragment. It is applied to every sample; its memory use grows
    linearly with the size of the system.
-8. **Extract all traits** on the cleaned root skeleton, using the raised collar as
-   the reference point; the primary root is traced continuously from the raised
+8. **Extract all traits** on the cleaned root skeleton, using the collar as
+   the reference point; the primary root is traced continuously from the
    collar following the real skeleton path, and its whole length is measured. An
    upward return at its tip is not corrected: its height is reported in the
    `pivot_return` column and, above 3 mm, drawn in the review figure so that the
@@ -157,10 +159,10 @@ gives the same results on a laptop and on a computing cluster.
 **Docker** (from the repository root):
 
 ```bash
-docker build -t rootctrait:2.5.0 .
+docker build -t rootctrait:2.6.0 .
 # the current folder holds params.txt, the data folder and receives results/
-docker run --rm -v "$PWD":/work rootctrait:2.5.0
-docker run --rm -v "$PWD":/work rootctrait:2.5.0 python -m tools.qc_rank --results /work/results
+docker run --rm -v "$PWD":/work rootctrait:2.6.0
+docker run --rm -v "$PWD":/work rootctrait:2.6.0 python -m tools.qc_rank --results /work/results
 ```
 
 **Apptainer** (Singularity), for clusters where Docker is not available, such as
@@ -170,7 +172,7 @@ can build (your own Linux machine, WSL, or a cluster that allows it), then copy 
 
 ```bash
 apptainer build rootctrait.sif rootctrait.def
-# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.5.0
+# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.6.0
 ```
 
 Example Slurm job, run from the project folder on the cluster:
@@ -323,6 +325,7 @@ All settings live in `params.txt`. Keys are case-insensitive. Lines starting wit
 | `DENS_MAX`      | `35`           | skeleton voxels within 2 mm above which a segment is dense; both rules remove dense segments only (0 disables) |
 | `DENS_LEN_MAX`  | `6`            | dense rule: max segment length (mm)                        |
 | `RESCUE_MIN_MM` | `5`            | min length of a detached fragment to rescue (mm, 0 = off)  |
+| `COLLAR_CLIMB`  | `0`            | raise the collar along the thick base column (1/0; 1 = behaviour before 2.6.0) |
 | `DROP_ORPHANS`  | `1`            | drop floating fragments (1/0)                              |
 | `SAVE_FIGURES`  | `1`            | write the interactive HTML figures (1/0)                   |
 | `EXPORT_RSML`   | `1`            | write one RSML file per sample (1/0)                       |
@@ -504,20 +507,20 @@ For each batch, in `results/<batch>/`:
   decontamination. Quality control columns follow: `pivot_return` (mm), the upward
   return of the pivot after its deepest point (0 when the deepest point is the tip);
   `n_rescued`, the number of detached roots rescued; `collar_raise` (mm), how far
-  the collar was raised; `hypocotyl` (mm), the length of the excluded hypocotyl;
+  the collar was raised (always 0 unless `COLLAR_CLIMB=1`); `hypocotyl` (mm), the length of the excluded hypocotyl;
   and `time` (s), the processing time of the sample. Tables and checkpoints
   written by versions before 2.1.0, which
   used French column names (`n_brut`, `n_retire`, `%retire`, `NRL_court_<5`,
   `NRL_moyen_5_15`), are still read and renamed by the tools.
-- **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the raised
+- **`figures/<sample>.html`**: interactive 3D view. Pivot (black, from the
   collar, as used for the traits), upward return of the pivot tip above 3 mm, kept
   in the traits but flagged for checking (brown, dotted), kept laterals (blue), removed pollution (red), hypocotyl (orange,
-  excluded), detached orphans (grey), original collar (green), raised collar
-  (purple diamond).
+  excluded), detached orphans (grey), collar (green), raised collar
+  (purple diamond, only with `COLLAR_CLIMB=1`).
 - **`rsml/<sample>.rsml`**: the cleaned root tree in the Root System Markup
   Language (Lobet et al., 2015, Plant Physiology 167, 617-627), readable by other
   root software (for example the OpenAlea `rsml` package, SmartRoot or archiDART).
-  One plant per file: the primary root (from the raised collar to its tip) and its
+  One plant per file: the primary root (from the collar to its tip) and its
   laterals nested in their parent root, each with its polyline, a diameter function
   (mm, at every point) and its branching order. Coordinates are in mm in the frame
   of the input volume: x and y are the horizontal axes X and Z, z is the depth
@@ -632,7 +635,7 @@ For a citable, frozen configuration, keep the `params.txt` (or the relevant
 │   ├── graph_extraction.py         Skeleton graph, branch points, pruning
 │   ├── root_decomposition.py       Decomposition into ordered roots
 │   ├── decontamination.py          Surface layers, orphan fragments, rescue
-│   ├── detection_hypocotyle.py     Bounded collar + hypocotyl detection
+│   ├── detection_hypocotyle.py     Hypocotyl detection (optional collar climb)
 │   ├── root_traits_full.py         Full trait set
 │   ├── rsml_export.py              Export of the root tree in RSML
 │   └── legacy.py                   Former column names (reads files from versions < 2.1.0)

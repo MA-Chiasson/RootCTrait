@@ -27,6 +27,7 @@ PROJECT_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if PROJECT_ROOT not in _sys.path:
     _sys.path.insert(0, PROJECT_ROOT)
 from rootctrait.legacy import upgrade_columns
+from rootctrait.sorting import natural_key
 
 
 def results_root():
@@ -69,7 +70,7 @@ def main():
         return
 
     # every xlsx under results/<batch>/ is a trait table
-    paths = sorted(glob.glob(os.path.join(root, "*", "*.xlsx")))
+    paths = sorted(glob.glob(os.path.join(root, "*", "*.xlsx")), key=natural_key)
     paths = [p for p in paths if "merged_traits" not in os.path.basename(p)]
     if not paths:
         print(f"No trait table found under {root}/<batch>/")

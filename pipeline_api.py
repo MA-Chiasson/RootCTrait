@@ -30,6 +30,7 @@ def default_params():
         "DENS_MAX": rp.DENS_MAX,
         "DENS_LEN_MAX": rp.DENS_LEN_MAX,
         "RESCUE_MIN_MM": rp.RESCUE_MIN_MM,
+        "COLLAR_CLIMB": rp.COLLAR_CLIMB,
         "SAVE_FIGURES": rp.SAVE_FIGURES,
         "EXPORT_RSML": rp.EXPORT_RSML,
         "TIMEOUT": rp.TIMEOUT,
@@ -70,6 +71,7 @@ def _apply(params):
     rp.DENS_MAX = float(params.get("DENS_MAX", 35))
     rp.DENS_LEN_MAX = float(params.get("DENS_LEN_MAX", 6))
     rp.RESCUE_MIN_MM = float(params.get("RESCUE_MIN_MM", 5))
+    rp.COLLAR_CLIMB = int(params.get("COLLAR_CLIMB", 0))
     rp.SAVE_FIGURES = bool(params.get("SAVE_FIGURES", True))
     rp.EXPORT_RSML = bool(params.get("EXPORT_RSML", True))
     rp.TIMEOUT = int(params.get("TIMEOUT", 1800))

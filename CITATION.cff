@@ -2,8 +2,8 @@ cff-version: 1.2.0
 title: "RootCTrait"
 message: "If you use this software, please cite it as below."
 type: software
-version: 2.5.0
-date-released: 2026-10-07
+version: 2.6.0
+date-released: 2026-11-24
 authors:
   - family-names: "Chiasson"
     given-names: "Marc-Antoine"

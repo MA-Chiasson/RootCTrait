@@ -4,7 +4,7 @@ One row per sample is written to the output Excel table: 38 traits plus bookkeep
 and quality control columns. Lengths are in cm, diameters in mm, volumes in cm3, angles in
 degrees; ratios and counts are dimensionless. Unless stated otherwise, traits are
 computed on the cleaned root system (hypocotyl, sheet artifacts and detached
-fragments excluded), and depths are measured from the raised collar.
+fragments excluded), and depths are measured from the collar.
 
 Lateral counts and lengths are computed on **segments**: a segment is a maximal
 chain of skeleton nodes of the same branching order, so a branched lateral
@@ -24,7 +24,7 @@ older checkpoint or trait table is read; the correspondence is listed in
 | `%removed`  | fraction removed (a scan-quality indicator; use as covariate)  |
 | `pivot_return` | upward return of the pivot after its deepest point, mm (quality control; check samples above 3 mm) |
 | `n_rescued` | number of detached roots rescued and joined back by decontamination |
-| `collar_raise` | how far the collar was raised above the thickest point, mm |
+| `collar_raise` | how far the collar was raised above the thickest point, mm (0 unless `COLLAR_CLIMB=1`) |
 | `hypocotyl` | length of the excluded hypocotyl skeleton, mm (0 when none was detected) |
 | `time` | processing time of the sample, s |
 
@@ -32,7 +32,7 @@ older checkpoint or trait table is read; the correspondence is listed in
 
 | Trait  | Definition                                                                  | Unit |
 |--------|-----------------------------------------------------------------------------|------|
-| `PRL`  | primary root (pivot) length, along the whole pivot path from the raised collar to its tip | cm |
+| `PRL`  | primary root (pivot) length, along the whole pivot path from the collar to its tip | cm |
 | `TRL`  | total root length (sum of all segment lengths)                              | cm   |
 | `LTRL` | total lateral length (segments of order >= 2)                               | cm   |
 | `MLRL` | mean length of lateral segments (order >= 2)                                | cm   |
@@ -48,17 +48,17 @@ older checkpoint or trait table is read; the correspondence is listed in
 | `NT`              | number of terminal segments (apices)                               | count |
 | `NBP`             | number of segments bearing at least one lateral                    | count |
 | `MaxO`            | maximum branching order                                            | count |
-| `NCR`             | proxy count of roots emerging near the collar: segments of order <= 2 with an end within 4 mm of the raised collar (minimum 1) | count |
+| `NCR`             | proxy count of roots emerging near the collar: segments of order <= 2 with an end within 4 mm of the collar (minimum 1) | count |
 | `LRD`              | lateral density: `NLR` per cm of `PRL`                             | nb/cm |
 | `IBD`             | mean distance along the pivot between successive lateral insertion points | cm |
 
 ## Depth
 
-Skeleton points more than 2 mm above the raised collar are ignored.
+Skeleton points more than 2 mm above the collar are ignored.
 
 | Trait | Definition                                                   | Unit |
 |-------|--------------------------------------------------------------|------|
-| `MD`  | maximum rooting depth below the raised collar                | cm   |
+| `MD`  | maximum rooting depth below the collar                | cm   |
 | `D50` | median depth of the skeleton point cloud                     | cm   |
 | `D95` | 95th percentile depth of the skeleton point cloud            | cm   |
 

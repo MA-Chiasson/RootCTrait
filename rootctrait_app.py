@@ -643,6 +643,11 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
                             "generates the HTML report of interactive 3D Plotly figures, by batch, "
                             "most suspect samples first, for visual validation.")
 
+        btn_plant = ttk.Button(tab_tools, text="🌱 Plant report", command=self.tool_plant_report)
+        btn_plant.pack(side="left", padx=4)
+        Tooltip(btn_plant, "Generates an HTML report of the 3D figures grouped by plant: the same plant at "
+                           "the different times (e.g. B2T2S1 and B2T3S1) side by side, each figure judged separately.")
+
         btn_del = ttk.Button(tab_tools, text="🗑 Delete checkpoints", command=self.tool_delete_checkpoints)
         btn_del.pack(side="left", padx=4)
         Tooltip(btn_del, "Deletes the checkpoints (checkpoint_traits.jsonl) of a results folder to start over: the "
@@ -1110,6 +1115,21 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
                     print(f"Report ready ({path}); could not auto-open: {e}")
         self._run_bg(do)
 
+    def tool_plant_report(self):
+        from tools import plant_report as pr
+        self.log(f"=== Generate plant report ({pr.RESULTS_ROOT}) ===")
+        def do(fmt):
+            from tools import qc_rank
+            qc_rank.run(pr.RESULTS_ROOT)             # flags shown on each figure
+            path = pr.generate()
+            if path:
+                try:
+                    webbrowser.open("file://" + os.path.abspath(path))
+                    print("Opened in your browser.")
+                except Exception as e:
+                    print(f"Report ready ({path}); could not auto-open: {e}")
+        self._run_bg(do)
+
     def tool_merge(self):
         d = filedialog.askdirectory(title="Select the results folder to merge")
         if not d: return
@@ -1117,7 +1137,8 @@ class App(TkinterDnD.Tk if _DND else tk.Tk):
         from tools import merge_batches as mb
         def do(fmt):
             frames, presence = [], {}
-            paths = sorted(__import__("glob").glob(__import__("os").path.join(d, "*", "*.xlsx")))
+            from rootctrait.sorting import natural_key
+            paths = sorted(__import__("glob").glob(__import__("os").path.join(d, "*", "*.xlsx")), key=natural_key)
             paths = [p for p in paths if "merged_traits" not in __import__("os").path.basename(p)]
             if not paths: print(f"No trait table found."); return
             import pandas as pd, os as _os

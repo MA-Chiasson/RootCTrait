@@ -31,6 +31,9 @@ DENS_LEN_MAX=6
 ; Detached fragments at least RESCUE_MIN_MM long (mm) and not dense are kept as roots
 ; and joined back to the system; 0 disables the rescue.
 RESCUE_MIN_MM=5
+; 1 = raise the collar along the thick base column (behaviour before 2.6.0);
+; 0 = the collar stays at the thickest skeleton point (default)
+COLLAR_CLIMB=0
 ; 1 = after decontamination, keep only the component that contains the primary root
 DROP_ORPHANS=1
 ; 1 = write one interactive HTML figure per sample (requires plotly)

@@ -186,7 +186,7 @@ def add_high_branches(segments, column_ids, base, base2, voxel_size,
 
 
 def collar_and_hypocotyl(sk, edt, kept, base, voxel_size,
-                         angle_max=45.0, frac=0.7, haut_min_mm=3.0):
+                         angle_max=45.0, frac=0.7, haut_min_mm=3.0, climb=False):
     """High-level function. Returns (base2, hypo_ids, gain_mm, column_pts).
     angle_max, frac and haut_min_mm default to the published values (45 degrees,
     0.7 x collar radius, 3 mm); they are exposed for the sensitivity analysis.
@@ -201,7 +201,12 @@ def collar_and_hypocotyl(sk, edt, kept, base, voxel_size,
     # fleshy base). If a hypocotyl is present, it stops at its entrance; otherwise it
     # climbs to the end of the thick column.
     hypo_vox = set(tuple(v) for s in kept if s['seg_id'] in col_ids for v in s['coords'])
-    base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size, frac=frac)
+    # climb=False (default since 2.6): the collar stays at the thickest point (base2 = base);
+    # everything vertical above it is hypocotyl. climb=True restores the bounded climb.
+    if climb:
+        base2, gain, column_pts = bounded_climb(sk, edt, base, hypo_vox, voxel_size, frac=frac)
+    else:
+        base2, gain, column_pts = np.asarray(base), 0.0, np.empty((0, 3), int)
     if col_ids:
         hypo_ids = add_high_branches(kept, col_ids, base, base2, voxel_size,
                                      haut_min_mm=haut_min_mm)

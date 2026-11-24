@@ -13,8 +13,9 @@ Review features:
   - free note field per sample;
   - "Export CSV" button to retrieve all the judgments at the end;
   - progress counter per batch;
-  - when results/qc_ranking.csv exists (python -m tools.qc_rank), the figures of
-    each batch are ordered by that ranking and the flags are shown on each card.
+  - samples in number order (S2 before S10); when results/qc_ranking.csv exists
+    (python -m tools.qc_rank), the flags are shown on each card and a button
+    switches to the QC order (most suspect first).
 
 Run from the project root: python -m tools.figure_report
 It scans results/<batch>/figures/*.html and writes results/figure_report.html.
@@ -34,9 +35,7 @@ OUTPUT_HTML = os.path.join(RESULTS_ROOT, "figure_report.html")
 PREFERRED_ORDER = []  # optional preferred display order of batches
 
 
-def sample_number(name):
-    m = re.findall(r"\d+", name)
-    return int(m[-1]) if m else 0
+from rootctrait.sorting import natural_key
 
 
 def scan_figures():
@@ -53,7 +52,7 @@ def scan_figures():
             name = os.path.splitext(os.path.basename(fp))[0]
             rel = os.path.join(RESULTS_ROOT, batch, "figures", os.path.basename(fp)).replace("\\", "/")
             figs.append((name, rel))
-        figs.sort(key=lambda t: sample_number(t[0]))
+        figs.sort(key=lambda t: natural_key(t[0]))
         if figs:
             batches[batch] = figs
     return batches
@@ -61,7 +60,7 @@ def scan_figures():
 
 def order_batches(batches):
     ordered = [b for b in PREFERRED_ORDER if b in batches]
-    ordered += sorted(b for b in batches if b not in PREFERRED_ORDER)
+    ordered += sorted((b for b in batches if b not in PREFERRED_ORDER), key=natural_key)
     return ordered
 
 
@@ -69,14 +68,15 @@ def build(batches):
     order = order_batches(batches)
     total = sum(len(v) for v in batches.values())
 
-    # data injected in JS; samples ordered by the QC ranking when it exists
+    # data injected in JS, in sample number order; the QC rank (when
+    # results/qc_ranking.csv exists) is attached so the page can switch order
     from tools.qc_rank import load_ranking
     qc = load_ranking(RESULTS_ROOT)
     data = {}
     for b in order:
         rk = qc.get(b, {})
-        items = sorted(batches[b], key=lambda t: rk.get(t[0], (10 ** 9, ''))[0]) if rk else batches[b]
-        data[b] = [{"name": n, "src": s, "flags": rk.get(n, (0, ''))[1]} for n, s in items]
+        data[b] = [{"name": n, "src": s, "flags": rk.get(n, (0, ''))[1],
+                    "rank": rk.get(n, (10 ** 9, ''))[0]} for n, s in batches[b]]
 
     html = []
     html.append("""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
@@ -126,6 +126,7 @@ def build(batches):
   <div class="barre" id="onglets"></div>
   <div class="barre" style="margin-top:8px">
     <input id="recherche" placeholder="filter (number or name)...">
+    <button class="onglet" id="ordre" onclick="toggleOrder()">Order: sample number</button>
     <button class="expbtn" onclick="exportCsv()">Export CSV</button>
   </div>
 </header>
@@ -135,6 +136,13 @@ def build(batches):
 const DATA = {json.dumps(data, ensure_ascii=False)};
 const ORDER = {json.dumps(order)};
 let activeBatch = ORDER[0];
+let byQc = false;
+
+function toggleOrder() {{
+  byQc = !byQc;
+  document.getElementById("ordre").textContent = byQc ? "Order: QC rank (most suspect first)" : "Order: sample number";
+  render();
+}}
 
 function makeKey(batch, name) {{ return "jug:" + batch + ":" + name; }}
 function noteKey(batch, name) {{ return "note:" + batch + ":" + name; }}
@@ -162,7 +170,8 @@ function render() {{
   const c = document.getElementById("contenu");
   c.innerHTML = "";
   const filtre = document.getElementById("recherche").value.toLowerCase();
-  for (const it of DATA[activeBatch]) {{
+  const items = byQc ? [...DATA[activeBatch]].sort((a, b) => a.rank - b.rank) : DATA[activeBatch];
+  for (const it of items) {{
     if (filtre && !it.name.toLowerCase().includes(filtre)) continue;
     const jug = localStorage.getItem(makeKey(activeBatch, it.name)) || "";
     const note = localStorage.getItem(noteKey(activeBatch, it.name)) || "";
