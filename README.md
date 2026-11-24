@@ -703,11 +703,13 @@ root systems).
 If you use RootCTrait, please cite the accompanying article (in preparation) and
 the software itself. A machine-readable citation is in [`CITATION.cff`](CITATION.cff).
 
-Each release is archived on Zenodo with a permanent DOI: version 2.0.0 is
+Each release is archived on Zenodo with a permanent DOI: version 2.6.0 is
+[10.5281/zenodo.24489469](https://doi.org/10.5281/zenodo.24489469), version 2.0.0 is
 [10.5281/zenodo.23019246](https://doi.org/10.5281/zenodo.23019246) and version
-1.0.0 is [10.5281/zenodo.22212849](https://doi.org/10.5281/zenodo.22212849). Cite the
-version you used, for example: "Root traits were extracted with RootCTrait v2.0.0
-(doi:10.5281/zenodo.23019246)."
+1.0.0 is [10.5281/zenodo.22212849](https://doi.org/10.5281/zenodo.22212849); all
+versions are listed in [`CITATION.cff`](CITATION.cff). Cite the version you used,
+for example: "Root traits were extracted with RootCTrait v2.6.0
+(doi:10.5281/zenodo.24489469)."
 
 ## License
 

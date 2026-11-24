@@ -21,6 +21,9 @@ keywords:
   - GWAS
 identifiers:
   - type: doi
+    value: 10.5281/zenodo.24489469
+    description: "Archived version 2.6.0"
+  - type: doi
     value: 10.5281/zenodo.23218195
     description: "Archived version 2.5.0"
   - type: doi
