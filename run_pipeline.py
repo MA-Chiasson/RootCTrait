@@ -334,11 +334,17 @@ def analyse_mask(BW, ctx, pre=None):
             clean[tuple(s_['coords'].T)] = True
         if len(bridge):
             clean[tuple(bridge.T)] = True
-        if clean[tuple(base)]:
+        if clean.any():
+            # Since 2.7.0 the collar is detected again on the cleaned skeleton, so that a
+            # contamination layer around the stem never takes part in the collar search
+            # (neither in the 20% window nor in the thickest point). The first, provisional
+            # collar only anchors the decomposition used by decontamination.
+            base = detect_base(clean, edt, voxel_size)
             segs2, prim, _, _, _ = decompose_root_system(clean, base, list(voxel_size), **decomp_kw)
             kept = segs2
             mask_segs = removed_segs + segs2
             n_rescued = len(joined)
+            sk = clean
         else:
             removed_segs = removed_segs + joined
     n_ret = len(removed_segs)

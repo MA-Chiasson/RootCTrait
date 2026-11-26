@@ -64,8 +64,9 @@ For each sample:
    and crop to the bounding box. An empty mask (no voxel above the threshold) is
    reported as an error and skipped, so one bad file never stops a batch.
 2. **Skeletonize** and prune short spurious branches.
-3. **Detect the collar** at the thickest skeleton point within the uppermost 20%
-   of the system in depth.
+3. **Detect a provisional collar** at the thickest skeleton point within the
+   uppermost 20% of the system in depth; it only anchors the decomposition used
+   by decontamination.
 4. **Decompose** the skeleton into ordered segments (order 1 = primary root,
    order 2 = laterals, etc.).
 5. **Decontaminate**: remove the surface layers (sheet rule: parallel, sheet-like
@@ -77,6 +78,9 @@ For each sample:
    the system by the shortest skeleton path through the removed layer, and the
    ordered tree is rebuilt on the cleaned skeleton, so that rescued roots recover a
    parent and an order and the primary root is chosen among genuine roots only.
+   The collar is then detected again on the cleaned skeleton (thickest point within
+   its uppermost 20%), so that a contamination layer around the stem never takes
+   part in the collar search (since 2.7.0).
 6. **Exclude the hypocotyl**: the hypocotyl (vertical stem column above the
    collar plus the branches hanging high on it) is excluded, while basal roots at
    collar level are kept. The collar stays at the thickest skeleton point, so a
@@ -159,10 +163,10 @@ gives the same results on a laptop and on a computing cluster.
 **Docker** (from the repository root):
 
 ```bash
-docker build -t rootctrait:2.6.0 .
+docker build -t rootctrait:2.7.0 .
 # the current folder holds params.txt, the data folder and receives results/
-docker run --rm -v "$PWD":/work rootctrait:2.6.0
-docker run --rm -v "$PWD":/work rootctrait:2.6.0 python -m tools.qc_rank --results /work/results
+docker run --rm -v "$PWD":/work rootctrait:2.7.0
+docker run --rm -v "$PWD":/work rootctrait:2.7.0 python -m tools.qc_rank --results /work/results
 ```
 
 **Apptainer** (Singularity), for clusters where Docker is not available, such as
@@ -172,7 +176,7 @@ can build (your own Linux machine, WSL, or a cluster that allows it), then copy 
 
 ```bash
 apptainer build rootctrait.sif rootctrait.def
-# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.6.0
+# or, from the Docker image: apptainer build rootctrait.sif docker-daemon://rootctrait:2.7.0
 ```
 
 Example Slurm job, run from the project folder on the cluster:
