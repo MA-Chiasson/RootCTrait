@@ -78,9 +78,9 @@ For each sample:
    the system by the shortest skeleton path through the removed layer, and the
    ordered tree is rebuilt on the cleaned skeleton, so that rescued roots recover a
    parent and an order and the primary root is chosen among genuine roots only.
-   The collar is then detected again on the cleaned skeleton (thickest point within
-   its uppermost 20%), so that a contamination layer around the stem never takes
-   part in the collar search (since 2.7.0).
+   The collar is then detected again: the depth window stays the uppermost 20% of
+   the full skeleton, but only cleaned skeleton voxels can be chosen, so a
+   contamination layer around the stem can never hold the collar (since 2.7.0).
 6. **Exclude the hypocotyl**: the hypocotyl (vertical stem column above the
    collar plus the branches hanging high on it) is excluded, while basal roots at
    collar level are kept. The collar stays at the thickest skeleton point, so a

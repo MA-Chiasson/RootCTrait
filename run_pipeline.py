@@ -122,18 +122,25 @@ COLS = [('PRL', 'cm', .1), ('TRL', 'cm', .1), ('LTRL', 'cm', .1), ('MLRL', 'cm',
         ('TOR', 'ratio', 1)]
 
 
-def detect_base(sk, edt, voxel_size, layer=0.20):
+def detect_base(sk, edt, voxel_size, layer=0.20, window_from=None):
     """Collar detection: THICKEST point in the upper layer of the skeleton (the
     shallowest 20% in depth). The true collar is the widest structure at the top of
     the system; anchoring there straightens and re-centers the pivot. This is more
     robust than a multi-criteria (depth/thickness/centrality) rule, especially when
     the primary root is thin, a frequent case that used to anchor the collar on an
-    off-center thin root."""
+    off-center thin root.
+    window_from: optional skeleton that defines the depth window (its shallowest
+    layer), while the candidates are taken from sk. Used after decontamination: the
+    window stays the one of the full skeleton and only cleaned voxels can be chosen."""
     sc = np.argwhere(sk)
     if len(sc) == 0:
         raise ValueError("Empty skeleton")
-    threshold = np.percentile(sc[:, 0], 100 * layer)
+    ref = sc if window_from is None else np.argwhere(window_from)
+    threshold = np.percentile(ref[:, 0], 100 * layer)
     top = sc[sc[:, 0] <= threshold]
+    if len(top) == 0:
+        threshold = np.percentile(sc[:, 0], 100 * layer)
+        top = sc[sc[:, 0] <= threshold]
     rad = edt[top[:, 0], top[:, 1], top[:, 2]]
     return top[np.argmax(rad)]
 
@@ -335,11 +342,13 @@ def analyse_mask(BW, ctx, pre=None):
         if len(bridge):
             clean[tuple(bridge.T)] = True
         if clean.any():
-            # Since 2.7.0 the collar is detected again on the cleaned skeleton, so that a
-            # contamination layer around the stem never takes part in the collar search
-            # (neither in the 20% window nor in the thickest point). The first, provisional
-            # collar only anchors the decomposition used by decontamination.
-            base = detect_base(clean, edt, voxel_size)
+            # Since 2.7.0 the collar is detected again after decontamination: the depth
+            # window stays the shallowest 20% of the full skeleton (so that it cannot slide
+            # down once the top layer is removed), but only cleaned skeleton voxels can be
+            # chosen, so a contamination layer around the stem can never hold the collar.
+            # The first, provisional collar only anchors the decomposition used by
+            # decontamination.
+            base = detect_base(clean, edt, voxel_size, window_from=sk)
             segs2, prim, _, _, _ = decompose_root_system(clean, base, list(voxel_size), **decomp_kw)
             kept = segs2
             mask_segs = removed_segs + segs2
